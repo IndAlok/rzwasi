@@ -132,6 +132,14 @@ meson setup "${BUILD_DIR}" \
     -Dportable=true \
     -Ddebugger=false
 
+print_status "Patching libzip for WASI compatibility..."
+LIBZIP_COMPAT="${RIZIN_DIR}/subprojects/libzip-1.9.2/lib/compat.h"
+if [ -f "${LIBZIP_COMPAT}" ]; then
+    sed -i 's/#define fseeko(s, o, w) (fseek((s), (long int)(o), (w)))/\/\* #define fseeko - disabled for WASI \*\//g' "${LIBZIP_COMPAT}"
+    sed -i 's/#define ftello(s) ((long)ftell((s)))/\/\* #define ftello - disabled for WASI \*\//g' "${LIBZIP_COMPAT}"
+    print_success "Patched libzip compat.h"
+fi
+
 print_status "Building Rizin (this may take a while)..."
 cd "${BUILD_DIR}"
 ninja -j${BUILD_JOBS}
