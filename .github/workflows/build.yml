@@ -33,7 +33,9 @@ jobs:
           pip3 install meson
 
       - name: Install WASI SDK
-        run: ./setup.sh install
+        run: |
+          chmod +x setup.sh build.sh
+          ./setup.sh install
 
       - name: Build Rizin WASM
         env:
