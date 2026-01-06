@@ -70,6 +70,12 @@ export_env() {
     export AR="${WASI_SDK_PATH}/bin/ar"
     export RANLIB="${WASI_SDK_PATH}/bin/ranlib"
     export STRIP="${WASI_SDK_PATH}/bin/strip"
+    export NM="${WASI_SDK_PATH}/bin/nm"
+    
+    if [ ! -x "$CC" ]; then
+        print_error "WASI SDK not installed. Run: $0 install"
+        return 1
+    fi
 }
 
 case "${1:-install}" in

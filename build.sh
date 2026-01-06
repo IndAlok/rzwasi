@@ -48,6 +48,7 @@ done
 
 RIZIN_DIR="${SCRIPT_DIR}/.rizin-src"
 BUILD_DIR="${RIZIN_DIR}/build-wasi"
+STUB_DIR="${SCRIPT_DIR}/.stubs"
 
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║           rzwasi - Build Rizin for WebAssembly           ║"
@@ -75,6 +76,22 @@ if [ "$CLEAN" = true ] && [ -d "${BUILD_DIR}" ]; then
     rm -rf "${BUILD_DIR}"
 fi
 
+print_status "Creating WASI stub libraries..."
+mkdir -p "${STUB_DIR}"
+
+cat > "${STUB_DIR}/stub.c" << 'STUB_EOF'
+void __wasi_stub_dummy(void) {}
+STUB_EOF
+
+"${CC}" -c "${STUB_DIR}/stub.c" -o "${STUB_DIR}/stub.o" --target=wasm32-wasi --sysroot="${WASI_SYSROOT}"
+"${AR}" rcs "${STUB_DIR}/librt.a" "${STUB_DIR}/stub.o"
+"${AR}" rcs "${STUB_DIR}/libutil.a" "${STUB_DIR}/stub.o"
+"${AR}" rcs "${STUB_DIR}/libdl.a" "${STUB_DIR}/stub.o"
+"${AR}" rcs "${STUB_DIR}/libm.a" "${STUB_DIR}/stub.o"
+"${AR}" rcs "${STUB_DIR}/libpthread.a" "${STUB_DIR}/stub.o"
+"${AR}" rcs "${STUB_DIR}/libexecinfo.a" "${STUB_DIR}/stub.o"
+print_success "Created WASI stub libraries"
+
 CROSS_FILE="${BUILD_DIR}/wasm32-wasi.txt"
 mkdir -p "${BUILD_DIR}"
 
@@ -88,8 +105,13 @@ strip = '${STRIP}'
 ranlib = '${RANLIB}'
 
 [built-in options]
-c_args = ['-D_WASI_EMULATED_SIGNAL', '-D_WASI_EMULATED_PROCESS_CLOCKS', '-D__wasi__=1', '-DHAVE_PTHREAD=0', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-Os', '-flto', '--sysroot=${WASI_SYSROOT}', '--target=wasm32-wasi']
-c_link_args = ['-flto', '-lwasi-emulated-signal', '-lwasi-emulated-process-clocks', '-Wl,-z,stack-size=8388608', '--sysroot=${WASI_SYSROOT}', '--target=wasm32-wasi']
+c_args = ['-D_WASI_EMULATED_SIGNAL', '-D_WASI_EMULATED_PROCESS_CLOCKS', '-D__wasi__=1', '-DHAVE_PTHREAD=0', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-DHAVE_EXECV=0', '-DHAVE_PIPE=0', '-Os', '-flto', '--sysroot=${WASI_SYSROOT}', '--target=wasm32-wasi', '-I${WASI_SYSROOT}/include']
+c_link_args = ['-flto', '-L${STUB_DIR}', '-lwasi-emulated-signal', '-lwasi-emulated-process-clocks', '-Wl,-z,stack-size=8388608', '--sysroot=${WASI_SYSROOT}', '--target=wasm32-wasi']
+
+[properties]
+sys_root = '${WASI_SYSROOT}'
+pkg_config_libdir = ''
+needs_exe_wrapper = true
 
 [host_machine]
 system = 'wasi'
@@ -100,6 +122,9 @@ EOF
 
 print_status "Configuring Rizin for WASI..."
 cd "${RIZIN_DIR}"
+
+export LIBRARY_PATH="${STUB_DIR}:${LIBRARY_PATH:-}"
+export C_INCLUDE_PATH="${WASI_SYSROOT}/include:${C_INCLUDE_PATH:-}"
 
 meson setup "${BUILD_DIR}" \
     --cross-file "${CROSS_FILE}" \
@@ -116,7 +141,9 @@ meson setup "${BUILD_DIR}" \
     -Duse_sys_tree_sitter=disabled \
     -Duse_sys_pcre2=disabled \
     -Duse_sys_lzma=disabled \
+    -Duse_sys_libzstd=disabled \
     -Duse_lzma=false \
+    -Duse_zlib=false \
     -Denable_tests=false \
     -Denable_rz_test=false \
     -Dcli=enabled \
