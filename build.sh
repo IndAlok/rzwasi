@@ -13,7 +13,6 @@ print_status() { echo -e "\033[1;34m==>\033[0m $1"; }
 print_error() { echo -e "\033[1;31mError:\033[0m $1" >&2; }
 print_success() { echo -e "\033[1;32m✓\033[0m $1"; }
 
-# Source setup.sh for environment
 source "${SCRIPT_DIR}/setup.sh" env 2>/dev/null || {
     print_error "Run ./setup.sh install first"
     exit 1
@@ -90,7 +89,7 @@ ranlib = '${RANLIB}'
 
 [built-in options]
 c_args = ['-D_WASI_EMULATED_SIGNAL', '-D_WASI_EMULATED_PROCESS_CLOCKS', '-D__wasi__=1', '-DHAVE_PTHREAD=0', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-Os', '-flto', '--sysroot=${WASI_SYSROOT}', '--target=wasm32-wasi']
-c_link_args = ['-flto', '-Wl,-z,stack-size=8388608', '--sysroot=${WASI_SYSROOT}', '--target=wasm32-wasi']
+c_link_args = ['-flto', '-lwasi-emulated-signal', '-lwasi-emulated-process-clocks', '-Wl,-z,stack-size=8388608', '--sysroot=${WASI_SYSROOT}', '--target=wasm32-wasi']
 
 [host_machine]
 system = 'wasi'
@@ -116,6 +115,8 @@ meson setup "${BUILD_DIR}" \
     -Duse_sys_openssl=disabled \
     -Duse_sys_tree_sitter=disabled \
     -Duse_sys_pcre2=disabled \
+    -Duse_sys_lzma=disabled \
+    -Duse_lzma=false \
     -Denable_tests=false \
     -Denable_rz_test=false \
     -Dcli=enabled \
