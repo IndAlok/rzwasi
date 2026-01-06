@@ -1,0 +1,56 @@
+name: Build Rizin WASM
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      rizin_version:
+        description: 'Rizin version (e.g., 0.7.3)'
+        required: false
+        default: '0.7.3'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        version: ['0.7.3']
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip ninja-build
+          pip3 install meson
+
+      - name: Install WASI SDK
+        run: ./setup.sh install
+
+      - name: Build Rizin WASM
+        env:
+          RIZIN_VERSION: ${{ github.event.inputs.rizin_version || matrix.version }}
+        run: ./build.sh -v "$RIZIN_VERSION"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rizin-${{ github.event.inputs.rizin_version || matrix.version }}-wasi
+          path: dist/
+          retention-days: 30
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            rizin-*-wasi.zip
+          generate_release_notes: true

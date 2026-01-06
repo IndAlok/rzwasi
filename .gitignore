@@ -1,0 +1,5 @@
+.wasi-sdk/
+.rizin-src/
+dist/
+*.zip
+*.wasm
