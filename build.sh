@@ -13,6 +13,7 @@ print_status() { echo -e "\033[1;34m==>\033[0m $1"; }
 print_error() { echo -e "\033[1;31mError:\033[0m $1" >&2; }
 print_success() { echo -e "\033[1;32m✓\033[0m $1"; }
 
+# Source setup.sh for environment
 source "${SCRIPT_DIR}/setup.sh" env 2>/dev/null || {
     print_error "Run ./setup.sh install first"
     exit 1
@@ -119,7 +120,6 @@ meson setup "${BUILD_DIR}" \
     -Denable_rz_test=false \
     -Dcli=enabled \
     -Dportable=true \
-    -Duse_webui=false \
     -Ddebugger=false
 
 print_status "Building Rizin (this may take a while)..."
