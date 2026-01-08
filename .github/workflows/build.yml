@@ -32,20 +32,26 @@ jobs:
           sudo apt-get install -y python3-pip ninja-build
           pip3 install meson
 
-      - name: Install WASI SDK
-        run: |
-          chmod +x setup.sh build.sh
-          ./setup.sh install
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.50'
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Verify Emscripten
+        run: emcc --version
 
       - name: Build Rizin WASM
         env:
           RIZIN_VERSION: ${{ github.event.inputs.rizin_version || matrix.version }}
-        run: ./build.sh -v "$RIZIN_VERSION"
+        run: |
+          chmod +x build.sh
+          ./build.sh -v "$RIZIN_VERSION"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rizin-${{ github.event.inputs.rizin_version || matrix.version }}-wasi
+          name: rizin-${{ github.event.inputs.rizin_version || matrix.version }}-wasm
           path: dist/
           retention-days: 30
 
@@ -54,5 +60,5 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            rizin-*-wasi.zip
+            rizin-*-wasm.zip
           generate_release_notes: true

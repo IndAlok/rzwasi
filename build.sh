@@ -1,6 +1,9 @@
 #!/bin/bash
 # SPDX-FileCopyrightText: 2024 RizinOrg <info@rizin.re>
 # SPDX-License-Identifier: LGPL-3.0-only
+#
+# Build Rizin for WebAssembly using Emscripten
+# Based on radare2's wasm.sh approach
 
 set -e
 
@@ -13,16 +16,11 @@ print_status() { echo -e "\033[1;34m==>\033[0m $1"; }
 print_error() { echo -e "\033[1;31mError:\033[0m $1" >&2; }
 print_success() { echo -e "\033[1;32m✓\033[0m $1"; }
 
-source "${SCRIPT_DIR}/setup.sh" env 2>/dev/null || {
-    print_error "Run ./setup.sh install first"
-    exit 1
-}
-
 print_usage() {
     cat <<EOF
 Usage: $0 [OPTIONS]
 
-Build Rizin for WebAssembly (WASI)
+Build Rizin for WebAssembly (Emscripten)
 
 Options:
   -v, --version VER   Rizin version to build (default: ${RIZIN_VERSION})
@@ -47,7 +45,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 RIZIN_DIR="${SCRIPT_DIR}/.rizin-src"
-BUILD_DIR="${RIZIN_DIR}/build-wasi"
+BUILD_DIR="${RIZIN_DIR}/build-wasm"
 
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║           rzwasi - Build Rizin for WebAssembly           ║"
@@ -58,55 +56,57 @@ echo "Output:    ${OUTPUT_DIR}"
 echo "Jobs:      ${BUILD_JOBS}"
 echo ""
 
+if ! command -v emcc &> /dev/null; then
+    print_error "Emscripten (emcc) not found. Please install and activate emsdk first."
+    print_status "Install emsdk: https://emscripten.org/docs/getting_started/downloads.html"
+    exit 1
+fi
+
+print_status "Using Emscripten: $(emcc --version | head -1)"
+
 if [ ! -d "${RIZIN_DIR}/.git" ]; then
     print_status "Cloning Rizin v${RIZIN_VERSION}..."
     git clone --depth 1 --branch "v${RIZIN_VERSION}" \
         https://github.com/rizinorg/rizin.git "${RIZIN_DIR}"
 else
-    print_status "Updating Rizin source..."
+    print_status "Using existing Rizin source..."
     cd "${RIZIN_DIR}"
-    git fetch --tags
-    git checkout "v${RIZIN_VERSION}" 2>/dev/null || git checkout "${RIZIN_VERSION}"
+    git fetch --tags 2>/dev/null || true
+    git checkout "v${RIZIN_VERSION}" 2>/dev/null || git checkout "${RIZIN_VERSION}" 2>/dev/null || true
     cd "${SCRIPT_DIR}"
 fi
-
-print_status "Patching meson.build for WASI compatibility..."
-cd "${RIZIN_DIR}"
-
-sed -i "s/have_lrt = not \['windows', 'darwin', 'openbsd', 'android', 'haiku'\]/have_lrt = not ['windows', 'darwin', 'openbsd', 'android', 'haiku', 'wasi']/g" meson.build
-sed -i "s/have_ptrace = not \['windows', 'cygwin', 'sunos', 'haiku'\]/have_ptrace = not ['windows', 'cygwin', 'sunos', 'haiku', 'wasi']/g" meson.build
-
-print_success "Applied WASI patches to meson.build"
 
 if [ "$CLEAN" = true ] && [ -d "${BUILD_DIR}" ]; then
     print_status "Cleaning previous build..."
     rm -rf "${BUILD_DIR}"
 fi
 
-CROSS_FILE="${BUILD_DIR}/wasm32-wasi.txt"
+CROSS_FILE="${BUILD_DIR}/wasm32-emscripten.txt"
 mkdir -p "${BUILD_DIR}"
 
-print_status "Generating Meson cross-file..."
+print_status "Generating Meson cross-file for Emscripten..."
 cat > "${CROSS_FILE}" <<EOF
 [binaries]
-c = '${CC}'
-cpp = '${CXX}'
-ar = '${AR}'
-strip = '${STRIP}'
-ranlib = '${RANLIB}'
+c = 'emcc'
+cpp = 'em++'
+ar = 'emar'
+strip = 'emstrip'
+ranlib = 'emranlib'
 
 [built-in options]
-c_args = ['-D_WASI_EMULATED_SIGNAL', '-D_WASI_EMULATED_PROCESS_CLOCKS', '-D__wasi__=1', '-DHAVE_PTHREAD=0', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-Os', '-flto', '--sysroot=${WASI_SYSROOT}', '--target=wasm32-wasi']
-c_link_args = ['-flto', '-lwasi-emulated-signal', '-lwasi-emulated-process-clocks', '-Wl,-z,stack-size=8388608', '--sysroot=${WASI_SYSROOT}', '--target=wasm32-wasi']
+c_args = ['-s', 'WASM=1', '-s', 'STANDALONE_WASM=1', '-Os', '-DHAVE_PTHREAD=0', '-DHAVE_PTY=0', '-DHAVE_FORK=0']
+c_link_args = ['-s', 'WASM=1', '-s', 'STANDALONE_WASM=1', '-s', 'ALLOW_MEMORY_GROWTH=1', '-s', 'TOTAL_STACK=8388608']
 
 [host_machine]
-system = 'wasi'
+system = 'emscripten'
 cpu_family = 'wasm32'
 cpu = 'wasm32'
 endian = 'little'
 EOF
 
-print_status "Configuring Rizin for WASI..."
+print_status "Configuring Rizin for WebAssembly..."
+
+cd "${RIZIN_DIR}"
 
 meson setup "${BUILD_DIR}" \
     --cross-file "${CROSS_FILE}" \
@@ -132,14 +132,6 @@ meson setup "${BUILD_DIR}" \
     -Dportable=true \
     -Ddebugger=false
 
-print_status "Patching libzip for WASI compatibility..."
-LIBZIP_COMPAT="${RIZIN_DIR}/subprojects/libzip-1.9.2/lib/compat.h"
-if [ -f "${LIBZIP_COMPAT}" ]; then
-    sed -i 's/#define fseeko(s, o, w) (fseek((s), (long int)(o), (w)))/\/\* #define fseeko - disabled for WASI \*\//g' "${LIBZIP_COMPAT}"
-    sed -i 's/#define ftello(s) ((long)ftell((s)))/\/\* #define ftello - disabled for WASI \*\//g' "${LIBZIP_COMPAT}"
-    print_success "Patched libzip compat.h"
-fi
-
 print_status "Building Rizin (this may take a while)..."
 cd "${BUILD_DIR}"
 ninja -j${BUILD_JOBS}
@@ -161,7 +153,7 @@ echo "${RIZIN_VERSION}" > "${OUTPUT_DIR}/VERSION"
 
 print_status "Creating release archive..."
 cd "${OUTPUT_DIR}"
-zip -r "${SCRIPT_DIR}/rizin-${RIZIN_VERSION}-wasi.zip" ./*
+zip -r "${SCRIPT_DIR}/rizin-${RIZIN_VERSION}-wasm.zip" ./*
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
@@ -169,4 +161,4 @@ echo "║                    Build Complete!                       ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 echo "Output: ${OUTPUT_DIR}"
-echo "Archive: rizin-${RIZIN_VERSION}-wasi.zip"
+echo "Archive: rizin-${RIZIN_VERSION}-wasm.zip"

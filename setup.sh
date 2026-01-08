@@ -1,85 +1,90 @@
 #!/bin/bash
 # SPDX-FileCopyrightText: 2024 RizinOrg <info@rizin.re>
 # SPDX-License-Identifier: LGPL-3.0-only
+#
+# Setup Emscripten SDK for Rizin WebAssembly builds
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WASI_SDK_VERSION="${WASI_SDK_VERSION:-24}"
-WASI_SDK_PATH="${WASI_SDK_PATH:-${SCRIPT_DIR}/.wasi-sdk}"
+EMSDK_VERSION="${EMSDK_VERSION:-3.1.50}"
+EMSDK_DIR="${EMSDK_DIR:-${HOME}/.emsdk}"
 
 print_status() { echo -e "\033[1;34m==>\033[0m $1"; }
 print_error() { echo -e "\033[1;31mError:\033[0m $1" >&2; }
 print_success() { echo -e "\033[1;32m✓\033[0m $1"; }
 
-install_wasi_sdk() {
-    if [ -d "${WASI_SDK_PATH}/bin" ]; then
-        print_success "WASI SDK already installed at ${WASI_SDK_PATH}"
-        return 0
-    fi
-
-    print_status "Installing WASI SDK ${WASI_SDK_VERSION}..."
+install_emsdk() {
+    print_status "Installing Emscripten SDK ${EMSDK_VERSION}..."
     
-    local os arch
-    case "$(uname -s)" in
-        Linux*)  os="linux" ;;
-        Darwin*) os="macos" ;;
-        MINGW*|MSYS*|CYGWIN*) os="windows" ;;
-        *) print_error "Unsupported OS"; exit 1 ;;
-    esac
-    
-    case "$(uname -m)" in
-        x86_64|amd64) arch="x86_64" ;;
-        arm64|aarch64) arch="arm64" ;;
-        *) print_error "Unsupported architecture"; exit 1 ;;
-    esac
-
-    local ext="tar.gz"
-    [ "$os" = "windows" ] && ext="zip"
-    
-    local url="https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-${arch}-${os}.${ext}"
-    
-    print_status "Downloading WASI SDK..."
-    
-    local tmpdir tmpfile
-    tmpdir="$(mktemp -d)"
-    tmpfile="${tmpdir}/wasi-sdk.${ext}"
-    
-    curl -fSL --progress-bar -o "$tmpfile" "$url" || wget -q --show-progress -O "$tmpfile" "$url"
-    
-    print_status "Extracting..."
-    mkdir -p "${WASI_SDK_PATH}"
-    
-    if [ "$ext" = "zip" ]; then
-        unzip -q "$tmpfile" -d "$tmpdir"
-    else
-        tar xzf "$tmpfile" -C "$tmpdir"
+    if [ ! -d "${EMSDK_DIR}" ]; then
+        print_status "Cloning emsdk..."
+        git clone https://github.com/emscripten-core/emsdk.git "${EMSDK_DIR}"
     fi
     
-    mv "${tmpdir}"/wasi-sdk-*/* "${WASI_SDK_PATH}/"
-    rm -rf "$tmpdir"
+    cd "${EMSDK_DIR}"
     
-    print_success "WASI SDK installed"
+    print_status "Updating emsdk..."
+    git pull 2>/dev/null || true
+    
+    print_status "Installing Emscripten ${EMSDK_VERSION}..."
+    ./emsdk install ${EMSDK_VERSION}
+    
+    print_status "Activating Emscripten ${EMSDK_VERSION}..."
+    ./emsdk activate ${EMSDK_VERSION}
+    
+    print_success "Emscripten SDK installed"
 }
 
-export_env() {
-    export WASI_SDK_PATH
-    export WASI_SYSROOT="${WASI_SDK_PATH}/share/wasi-sysroot"
-    export CC="${WASI_SDK_PATH}/bin/clang"
-    export CXX="${WASI_SDK_PATH}/bin/clang++"
-    export AR="${WASI_SDK_PATH}/bin/ar"
-    export RANLIB="${WASI_SDK_PATH}/bin/ranlib"
-    export STRIP="${WASI_SDK_PATH}/bin/strip"
-    export NM="${WASI_SDK_PATH}/bin/nm"
+activate_emsdk() {
+    if [ ! -d "${EMSDK_DIR}" ]; then
+        print_error "emsdk not found at ${EMSDK_DIR}"
+        print_status "Run: $0 install"
+        return 1
+    fi
     
-    if [ ! -x "$CC" ]; then
-        print_error "WASI SDK not installed. Run: $0 install"
+    source "${EMSDK_DIR}/emsdk_env.sh" 2>/dev/null
+    
+    if command -v emcc &> /dev/null; then
+        print_success "Emscripten activated: $(emcc --version | head -1)"
+        return 0
+    else
+        print_error "Failed to activate Emscripten"
         return 1
     fi
 }
 
-case "${1:-install}" in
-    install) install_wasi_sdk ;;
-    env) export_env ;;
-    *) echo "Usage: $0 {install|env}"; exit 1 ;;
+export_env() {
+    if [ ! -d "${EMSDK_DIR}" ]; then
+        print_error "emsdk not found"
+        return 1
+    fi
+    
+    source "${EMSDK_DIR}/emsdk_env.sh" 2>/dev/null
+    
+    export CC="emcc"
+    export CXX="em++"
+    export AR="emar"
+    export RANLIB="emranlib"
+    export STRIP="emstrip"
+}
+
+case "${1:-env}" in
+    install)
+        install_emsdk
+        ;;
+    activate)
+        activate_emsdk
+        ;;
+    env)
+        export_env
+        ;;
+    *)
+        echo "Usage: $0 {install|activate|env}"
+        echo ""
+        echo "Commands:"
+        echo "  install   - Download and install Emscripten SDK"
+        echo "  activate  - Activate Emscripten in current shell"
+        echo "  env       - Export environment variables (default)"
+        exit 1
+        ;;
 esac
