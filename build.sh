@@ -76,6 +76,17 @@ else
     cd "${SCRIPT_DIR}"
 fi
 
+print_status "Applying Emscripten compatibility patches..."
+cd "${RIZIN_DIR}"
+
+if grep -q "'emscripten'" meson.build 2>/dev/null; then
+    print_success "Patches already applied"
+else
+    sed -i "s/have_lrt = not \['windows', 'darwin', 'openbsd', 'android', 'haiku'\]/have_lrt = not ['windows', 'darwin', 'openbsd', 'android', 'haiku', 'emscripten', 'wasi']/g" meson.build
+    sed -i "s/have_ptrace = not \['windows', 'cygwin', 'sunos', 'haiku'\]/have_ptrace = not ['windows', 'cygwin', 'sunos', 'haiku', 'emscripten', 'wasi']/g" meson.build
+    print_success "Applied meson.build patches for Emscripten"
+fi
+
 if [ "$CLEAN" = true ] && [ -d "${BUILD_DIR}" ]; then
     print_status "Cleaning previous build..."
     rm -rf "${BUILD_DIR}"
@@ -85,7 +96,7 @@ CROSS_FILE="${BUILD_DIR}/wasm32-emscripten.txt"
 mkdir -p "${BUILD_DIR}"
 
 print_status "Generating Meson cross-file for Emscripten..."
-cat > "${CROSS_FILE}" <<EOF
+cat > "${CROSS_FILE}" <<'EOF'
 [binaries]
 c = 'emcc'
 cpp = 'em++'
@@ -94,8 +105,8 @@ strip = 'emstrip'
 ranlib = 'emranlib'
 
 [built-in options]
-c_args = ['-s', 'WASM=1', '-s', 'STANDALONE_WASM=1', '-Os', '-DHAVE_PTHREAD=0', '-DHAVE_PTY=0', '-DHAVE_FORK=0']
-c_link_args = ['-s', 'WASM=1', '-s', 'STANDALONE_WASM=1', '-s', 'ALLOW_MEMORY_GROWTH=1', '-s', 'TOTAL_STACK=8388608']
+c_args = ['-Os', '-DHAVE_PTHREAD=0', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-DHAVE_LIB_RT=0']
+c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0']
 
 [host_machine]
 system = 'emscripten'
@@ -105,8 +116,6 @@ endian = 'little'
 EOF
 
 print_status "Configuring Rizin for WebAssembly..."
-
-cd "${RIZIN_DIR}"
 
 meson setup "${BUILD_DIR}" \
     --cross-file "${CROSS_FILE}" \
@@ -141,11 +150,15 @@ mkdir -p "${OUTPUT_DIR}"
 
 TOOLS="rizin rz-bin rz-asm rz-hash rz-diff rz-find rz-ax"
 for tool in $TOOLS; do
-    src="binrz/${tool}/${tool}"
-    if [ -f "$src" ]; then
-        cp "$src" "${OUTPUT_DIR}/${tool}.wasm"
+    src="binrz/${tool}/${tool}.js"
+    wasm_src="binrz/${tool}/${tool}.wasm"
+    if [ -f "$wasm_src" ]; then
+        cp "$wasm_src" "${OUTPUT_DIR}/${tool}.wasm"
         size=$(ls -lh "${OUTPUT_DIR}/${tool}.wasm" | awk '{print $5}')
         print_success "${tool}.wasm (${size})"
+    elif [ -f "$src" ]; then
+        cp "$src" "${OUTPUT_DIR}/${tool}.js"
+        print_success "${tool}.js"
     fi
 done
 
