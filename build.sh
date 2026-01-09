@@ -133,6 +133,25 @@ RANDPATCH
         sed -i 's/#ifdef HAVE_CLONEFILE/#if 0/g' "$STDIO_FILE"
         print_success "Patched zip_source_file_stdio_named.c"
     fi
+
+    # Patch zipint.h to shim memcpy_s and strncpy_s (missing in Emscripten)
+    ZIPINT_H="${LIBZIP_DIR}/lib/zipint.h"
+    if [ -f "$ZIPINT_H" ]; then
+        # Append shims to the end of the file
+        cat >> "$ZIPINT_H" << 'EOF'
+
+#ifdef __EMSCRIPTEN__
+#include <string.h>
+#ifndef memcpy_s
+#define memcpy_s(dest, destsz, src, count) memcpy(dest, src, count)
+#endif
+#ifndef strncpy_s
+#define strncpy_s(dest, destsz, src, count) strncpy(dest, src, count)
+#endif
+#endif
+EOF
+        print_success "Patched zipint.h with secure string shims"
+    fi
 else
     print_error "libzip not found - subprojects may not have downloaded"
 fi
