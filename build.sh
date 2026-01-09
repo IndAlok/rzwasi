@@ -68,7 +68,7 @@ strip = 'emstrip'
 ranlib = 'emranlib'
 
 [built-in options]
-c_args = ['-Os', '-DHAVE_PTHREAD=0', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-D__EMSCRIPTEN__=1']
+c_args = ['-Os', '-DHAVE_PTHREAD=0', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-DHAVE_BACKTRACE=0', '-DHAVE_ENVIRON=0', '-DHAVE_SIGACTION=0', '-D__EMSCRIPTEN__=1']
 c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0']
 
 [host_machine]
