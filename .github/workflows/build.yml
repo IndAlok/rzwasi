@@ -75,6 +75,18 @@ jobs:
           replace_artifacts: true
           overwrite: true
 
+      # Push to gh-pages branch for jsDelivr CDN access
+      - name: Deploy to gh-pages for CDN
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cd dist
+          git init
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add .
+          git commit -m "Deploy WASM files to gh-pages"
+          git push --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:gh-pages
+
       - name: Create Versioned Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
