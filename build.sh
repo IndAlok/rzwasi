@@ -68,8 +68,9 @@ strip = 'emstrip'
 ranlib = 'emranlib'
 
 [built-in options]
-c_args = ['-Os', '-DHAVE_PTHREAD=0', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-DHAVE_BACKTRACE=0', '-DHAVE_ENVIRON=0', '-DHAVE_SIGACTION=0', '-D__EMSCRIPTEN__=1']
-c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0']
+# Keep HAVE_PTHREAD - Emscripten supports pthreads. Only disable truly unsupported features.
+c_args = ['-Os', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-DHAVE_BACKTRACE=0', '-D__EMSCRIPTEN__=1']
+c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0', '-pthread']
 
 [host_machine]
 system = 'emscripten'
@@ -157,15 +158,16 @@ meson setup "${BUILD_DIR}" \
     -Ddebugger=false
 
 # Step 4: Patch generated rz_userconf.h to disable Emscripten-incompatible features
-# Meson generates this file with detected features that don't work in Emscripten
+# Keep HAVE_PTHREAD=1 (Emscripten supports pthreads via -pthread flag)
+# Only disable features that truly don't work in WASM environment
 print_status "Patching rz_userconf.h for Emscripten..."
 USERCONF="${BUILD_DIR}/rz_userconf.h"
 if [ -f "$USERCONF" ]; then
-    sed -i 's/#define HAVE_PTHREAD.*1/#define HAVE_PTHREAD 0/g' "$USERCONF"
+    # Disable fork (not available in WASM)
     sed -i 's/#define HAVE_FORK.*1/#define HAVE_FORK 0/g' "$USERCONF"
+    # Disable backtrace (execinfo.h not available)
     sed -i 's/#define HAVE_BACKTRACE.*1/#define HAVE_BACKTRACE 0/g' "$USERCONF"
-    sed -i 's/#define HAVE_ENVIRON.*1/#define HAVE_ENVIRON 0/g' "$USERCONF"
-    sed -i 's/#define HAVE_SIGACTION.*1/#define HAVE_SIGACTION 0/g' "$USERCONF"
+    # Disable PTY functions (not available in WASM)
     sed -i 's/#define HAVE_OPENPTY.*1/#define HAVE_OPENPTY 0/g' "$USERCONF"
     sed -i 's/#define HAVE_FORKPTY.*1/#define HAVE_FORKPTY 0/g' "$USERCONF"
     sed -i 's/#define HAVE_LOGIN_TTY.*1/#define HAVE_LOGIN_TTY 0/g' "$USERCONF"
