@@ -130,6 +130,16 @@ else
     print_error "libzip not found - subprojects may not have downloaded"
 fi
 
+# Patch rz_heap_jemalloc.h to skip jemalloc internals for Emscripten
+# The jemalloc headers have types (nstime_t, JM_NBINS, NPSIZES) that don't exist in Emscripten
+print_status "Patching Rizin source for Emscripten compatibility..."
+HEAP_JEM_H="${RIZIN_DIR}/librz/include/rz_heap_jemalloc.h"
+if [ -f "$HEAP_JEM_H" ]; then
+    # Guard the problematic jemalloc include
+    sed -i 's|#include <rz_jemalloc/internal/jemalloc_internal.h>|#ifndef __EMSCRIPTEN__\n#include <rz_jemalloc/internal/jemalloc_internal.h>\n#endif|g' "$HEAP_JEM_H"
+    print_success "Patched rz_heap_jemalloc.h"
+fi
+
 # Step 3: Clean build directory and run full meson setup
 print_status "Configuring Rizin..."
 rm -rf "${BUILD_DIR}"
