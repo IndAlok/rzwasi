@@ -156,7 +156,23 @@ meson setup "${BUILD_DIR}" \
     -Dportable=true \
     -Ddebugger=false
 
-# Step 4: Build
+# Step 4: Patch generated rz_userconf.h to disable Emscripten-incompatible features
+# Meson generates this file with detected features that don't work in Emscripten
+print_status "Patching rz_userconf.h for Emscripten..."
+USERCONF="${BUILD_DIR}/rz_userconf.h"
+if [ -f "$USERCONF" ]; then
+    sed -i 's/#define HAVE_PTHREAD.*1/#define HAVE_PTHREAD 0/g' "$USERCONF"
+    sed -i 's/#define HAVE_FORK.*1/#define HAVE_FORK 0/g' "$USERCONF"
+    sed -i 's/#define HAVE_BACKTRACE.*1/#define HAVE_BACKTRACE 0/g' "$USERCONF"
+    sed -i 's/#define HAVE_ENVIRON.*1/#define HAVE_ENVIRON 0/g' "$USERCONF"
+    sed -i 's/#define HAVE_SIGACTION.*1/#define HAVE_SIGACTION 0/g' "$USERCONF"
+    sed -i 's/#define HAVE_OPENPTY.*1/#define HAVE_OPENPTY 0/g' "$USERCONF"
+    sed -i 's/#define HAVE_FORKPTY.*1/#define HAVE_FORKPTY 0/g' "$USERCONF"
+    sed -i 's/#define HAVE_LOGIN_TTY.*1/#define HAVE_LOGIN_TTY 0/g' "$USERCONF"
+    print_success "Patched rz_userconf.h"
+fi
+
+# Step 5: Build
 print_status "Building Rizin..."
 cd "${BUILD_DIR}"
 ninja -j${BUILD_JOBS}
