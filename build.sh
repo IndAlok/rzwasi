@@ -152,7 +152,8 @@ if [ -f "$SYS_C" ]; then
     
     # Replace the TODO warning with actual implementation
     # The pattern matches the warning line in rz_sys_backtrace function
-    sed -i 's|#warning TODO: rz_sys_backtrace : unimplemented|#ifdef __EMSCRIPTEN__\n\tchar buf[1024];\n\tint len = emscripten_get_callstack(EM_LOG_C_STACK | EM_LOG_JS_STACK, buf, sizeof(buf));\n\tif (len > 0) { eprintf("%s\\n", buf); }\n\treturn;\n#else\n#warning TODO: rz_sys_backtrace : unimplemented\n#endif|g' "$SYS_C"
+    # We use ~ as delimiter because the C code contains | (bitwise OR)
+    sed -i 's~#warning TODO: rz_sys_backtrace : unimplemented~#ifdef __EMSCRIPTEN__\n\tchar buf[1024];\n\tint len = emscripten_get_callstack(EM_LOG_C_STACK | EM_LOG_JS_STACK, buf, sizeof(buf));\n\tif (len > 0) { eprintf("%s\\n", buf); }\n\treturn;\n#else\n#warning TODO: rz_sys_backtrace : unimplemented\n#endif~g' "$SYS_C"
     print_success "Patched librz/util/sys.c for WASM backtrace"
 fi
 
