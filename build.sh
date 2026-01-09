@@ -68,9 +68,10 @@ strip = 'emstrip'
 ranlib = 'emranlib'
 
 [built-in options]
-# Keep HAVE_PTHREAD - Emscripten supports pthreads. Only disable truly unsupported features.
-c_args = ['-Os', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-DHAVE_BACKTRACE=0', '-D__EMSCRIPTEN__=1']
-c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0', '-pthread']
+# Single-threaded build for maximum web browser compatibility
+# (pthreads require SharedArrayBuffer which has browser compatibility issues)
+c_args = ['-Os', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-DHAVE_BACKTRACE=0', '-DHAVE_PTHREAD=0', '-D__EMSCRIPTEN__=1']
+c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=33554432', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0']
 
 [host_machine]
 system = 'emscripten'
@@ -168,11 +169,13 @@ meson setup "${BUILD_DIR}" \
     -Ddebugger=false
 
 # Step 4: Patch generated rz_userconf.h to disable Emscripten-incompatible features
-# Keep HAVE_PTHREAD=1 (Emscripten supports pthreads via -pthread flag)
-# Only disable features that truly don't work in WASM environment
+# Single-threaded build for web browser compatibility
+# (pthreads require SharedArrayBuffer which has browser security restrictions)
 print_status "Patching rz_userconf.h for Emscripten..."
 USERCONF="${BUILD_DIR}/rz_userconf.h"
 if [ -f "$USERCONF" ]; then
+    # Disable pthread (single-threaded build for web compatibility)
+    sed -i 's/#define HAVE_PTHREAD.*1/#define HAVE_PTHREAD 0/g' "$USERCONF"
     # Disable fork (not available in WASM)
     sed -i 's/#define HAVE_FORK.*1/#define HAVE_FORK 0/g' "$USERCONF"
     # Disable backtrace (execinfo.h not available)
