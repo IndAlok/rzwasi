@@ -148,6 +148,9 @@ RANDPATCH
 #ifndef strncpy_s
 #define strncpy_s(dest, destsz, src, count) strncpy(dest, src, count)
 #endif
+#ifndef strerror_s
+#define strerror_s(buf, bufsz, errnum) (strncpy(buf, strerror(errnum), bufsz), buf[(bufsz)-1] = '\0', 0)
+#endif
 #endif
 EOF
         print_success "Patched zipint.h with secure string shims"
