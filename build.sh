@@ -45,9 +45,14 @@ print_status "Emscripten: $(emcc --version | head -1)"
 
 # Clone Rizin
 if [ ! -d "${RIZIN_DIR}/.git" ]; then
-    print_status "Cloning Rizin v${RIZIN_VERSION}..."
-    git clone --depth 1 --branch "v${RIZIN_VERSION}" \
-        https://github.com/rizinorg/rizin.git "${RIZIN_DIR}"
+    if [ "$RIZIN_VERSION" = "nightly" ]; then
+        print_status "Cloning Rizin (nightly/HEAD)..."
+        git clone --depth 1 https://github.com/rizinorg/rizin.git "${RIZIN_DIR}"
+    else
+        print_status "Cloning Rizin v${RIZIN_VERSION}..."
+        git clone --depth 1 --branch "v${RIZIN_VERSION}" \
+            https://github.com/rizinorg/rizin.git "${RIZIN_DIR}"
+    fi
 fi
 
 cd "${RIZIN_DIR}"
