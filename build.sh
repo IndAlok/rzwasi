@@ -57,9 +57,8 @@ if [ "$CLEAN" = true ] && [ -d "${BUILD_DIR}" ]; then
     rm -rf "${BUILD_DIR}"
 fi
 
-# Create cross-file
-mkdir -p "${BUILD_DIR}"
-CROSS_FILE="${BUILD_DIR}/wasm32-emscripten.txt"
+# Store cross-file outside build directory to avoid meson conflicts
+CROSS_FILE="${RIZIN_DIR}/wasm32-emscripten.txt"
 cat > "${CROSS_FILE}" <<'EOF'
 [binaries]
 c = 'emcc'
@@ -130,13 +129,13 @@ else
     print_error "libzip not found - subprojects may not have downloaded"
 fi
 
-# Step 3: Run full meson setup
+# Step 3: Clean build directory and run full meson setup
 print_status "Configuring Rizin..."
+rm -rf "${BUILD_DIR}"
 meson setup "${BUILD_DIR}" \
     --cross-file "${CROSS_FILE}" \
     --default-library=static \
     --prefer-static \
-    --wipe \
     -Dstatic_runtime=true \
     -Duse_sys_capstone=disabled \
     -Duse_sys_magic=disabled \
