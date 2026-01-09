@@ -226,5 +226,15 @@ for tool in rizin rz-bin rz-asm rz-hash rz-diff rz-find rz-ax; do
 done
 echo "${RIZIN_VERSION}" > "${OUTPUT_DIR}/VERSION"
 
+# Create ZIP artifact for release
+if command -v zip >/dev/null; then
+    print_status "Creating ZIP artifact..."
+    ZIP_NAME="rizin-${RIZIN_VERSION}-wasm.zip"
+    (cd "${OUTPUT_DIR}" && zip -r "../${ZIP_NAME}" .)
+    print_success "Created ${ZIP_NAME}"
+else
+    print_error "zip command not found, skipping zip creation"
+fi
+
 echo ""
 print_success "Build complete! Output: ${OUTPUT_DIR}"
