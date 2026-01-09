@@ -181,6 +181,8 @@ if [ -f "$USERCONF" ]; then
     sed -i 's/#define HAVE_OPENPTY.*1/#define HAVE_OPENPTY 0/g' "$USERCONF"
     sed -i 's/#define HAVE_FORKPTY.*1/#define HAVE_FORKPTY 0/g' "$USERCONF"
     sed -i 's/#define HAVE_LOGIN_TTY.*1/#define HAVE_LOGIN_TTY 0/g' "$USERCONF"
+    # Disable jemalloc heap analysis (jemalloc internals use types not available in Emscripten)
+    sed -i 's/#define HAVE_JEMALLOC.*1/#define HAVE_JEMALLOC 0/g' "$USERCONF"
     print_success "Patched rz_userconf.h"
 fi
 
