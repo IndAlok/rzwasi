@@ -142,6 +142,20 @@ if [ -f "$HEAP_JEM_H" ]; then
     print_success "Patched rz_heap_jemalloc.h"
 fi
 
+# Patch librz/util/sys.c to implement backtrace using Emscripten API
+# We inject the implementation directly into the source
+print_status "Patching librz/util/sys.c for WASM backtrace..."
+SYS_C="${RIZIN_DIR}/librz/util/sys.c"
+if [ -f "$SYS_C" ]; then
+    # Add include at the top
+    sed -i '1s/^/#ifdef __EMSCRIPTEN__\n#include <emscripten.h>\n#endif\n/' "$SYS_C"
+    
+    # Replace the TODO warning with actual implementation
+    # The pattern matches the warning line in rz_sys_backtrace function
+    sed -i 's|#warning TODO: rz_sys_backtrace : unimplemented|#ifdef __EMSCRIPTEN__\n\tchar buf[1024];\n\tint len = emscripten_get_callstack(EM_LOG_C_STACK | EM_LOG_JS_STACK, buf, sizeof(buf));\n\tif (len > 0) { eprintf("%s\\n", buf); }\n\treturn;\n#else\n#warning TODO: rz_sys_backtrace : unimplemented\n#endif|g' "$SYS_C"
+    print_success "Patched librz/util/sys.c for WASM backtrace"
+fi
+
 # Step 3: Clean build directory and run full meson setup
 print_status "Configuring Rizin..."
 rm -rf "${BUILD_DIR}"
@@ -176,8 +190,8 @@ USERCONF="${BUILD_DIR}/rz_userconf.h"
 if [ -f "$USERCONF" ]; then
     # Disable fork (not available in WASM)
     sed -i 's/#define HAVE_FORK.*1/#define HAVE_FORK 0/g' "$USERCONF"
-    # Disable backtrace (execinfo.h not available)
-    sed -i 's/#define HAVE_BACKTRACE.*1/#define HAVE_BACKTRACE 0/g' "$USERCONF"
+    # Enable HAVE_BACKTRACE (we implemented it in sys.c)
+    # sed -i 's/#define HAVE_BACKTRACE.*1/#define HAVE_BACKTRACE 0/g' "$USERCONF"
     # Disable PTY functions (not available in WASM)
     sed -i 's/#define HAVE_OPENPTY.*1/#define HAVE_OPENPTY 0/g' "$USERCONF"
     sed -i 's/#define HAVE_FORKPTY.*1/#define HAVE_FORKPTY 0/g' "$USERCONF"
