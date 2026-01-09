@@ -71,7 +71,7 @@ ranlib = 'emranlib'
 # CRITICAL: -pthread must be in BOTH c_args AND c_link_args
 # This ensures ALL object files are compiled with atomics/bulk-memory features
 # Without this, wasm-ld fails with "--shared-memory is disallowed" errors
-c_args = ['-Os', '-pthread', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-DHAVE_BACKTRACE=0', '-D__EMSCRIPTEN__=1']
+c_args = ['-Os', '-pthread', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-D__EMSCRIPTEN__=1']
 c_link_args = ['-pthread', '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=33554432', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0']
 
 [host_machine]
@@ -149,6 +149,9 @@ SYS_C="${RIZIN_DIR}/librz/util/sys.c"
 if [ -f "$SYS_C" ]; then
     # Add include at the top
     sed -i '1s/^/#ifdef __EMSCRIPTEN__\n#include <emscripten.h>\n#endif\n/' "$SYS_C"
+    
+    # Guard execinfo.h include (not available in Emscripten)
+    sed -i 's|#include <execinfo.h>|#ifndef __EMSCRIPTEN__\n#include <execinfo.h>\n#endif|g' "$SYS_C"
     
     # Replace the TODO warning with actual implementation
     # The pattern matches the warning line in rz_sys_backtrace function
