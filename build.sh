@@ -152,6 +152,10 @@ if [ -f "$SYS_C" ]; then
     
     # Guard execinfo.h include (not available in Emscripten)
     sed -i 's|#include <execinfo.h>|#ifndef __EMSCRIPTEN__\n#include <execinfo.h>\n#endif|g' "$SYS_C"
+
+    # Guard the HAVE_BACKTRACE block to exclude Emscripten
+    # This prevents the standard backtrace() calls from being compiled
+    sed -i 's|#if HAVE_BACKTRACE|#if HAVE_BACKTRACE \&\& !defined(__EMSCRIPTEN__)|g' "$SYS_C"
     
     # Replace the TODO warning with actual implementation
     # The pattern matches the warning line in rz_sys_backtrace function
