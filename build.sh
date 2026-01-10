@@ -339,14 +339,14 @@ fi
 print_status "Patching librz/util/thread_sem.c for Emscripten..."
 THREAD_SEM_C="${RIZIN_DIR}/librz/util/thread_sem.c"
 if [ -f "$THREAD_SEM_C" ]; then
-    # Insert #elif defined(__EMSCRIPTEN__) before #endif in rz_th_sem_new
-    # This lets the struct be allocated but skips platform-specific init
+    # Insert #elif defined(__EMSCRIPTEN__) BEFORE #elif __WINDOWS__ in rz_th_sem_new
+    # IMPORTANT: Cannot use #endif matching because there's a nested #if RZ_SEM_NAMED_ONLY block
     awk '
     /rz_th_sem_new/ { in_sem_new = 1 }
     /rz_th_sem_free/ { in_sem_new = 0 }
     
-    # In rz_th_sem_new, insert before #endif that closes the HAVE_PTHREAD/#elif __WINDOWS__ block
-    /^#endif$/ && in_sem_new == 1 && !sem_new_patched {
+    # Insert BEFORE #elif __WINDOWS__ to avoid nested #if issues
+    /^#elif __WINDOWS__/ && in_sem_new == 1 && !sem_new_patched {
         print "#elif defined(__EMSCRIPTEN__)"
         print "\t/* Single-threaded: no semaphore init needed */"
         sem_new_patched = 1
@@ -362,12 +362,12 @@ fi
 print_status "Patching librz/util/thread_cond.c for Emscripten..."
 THREAD_COND_C="${RIZIN_DIR}/librz/util/thread_cond.c"
 if [ -f "$THREAD_COND_C" ]; then
-    # Insert #elif defined(__EMSCRIPTEN__) before #endif in rz_th_cond_new
+    # Insert #elif defined(__EMSCRIPTEN__) BEFORE #elif __WINDOWS__ in rz_th_cond_new
     awk '
     /rz_th_cond_new/ { in_cond_new = 1 }
     /rz_th_cond_signal/ { in_cond_new = 0 }
     
-    /^#endif$/ && in_cond_new == 1 && !cond_new_patched {
+    /^#elif __WINDOWS__/ && in_cond_new == 1 && !cond_new_patched {
         print "#elif defined(__EMSCRIPTEN__)"
         print "\t/* Single-threaded: no condition var init needed */"
         cond_new_patched = 1
