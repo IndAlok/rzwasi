@@ -227,6 +227,71 @@ else
     print_error "Could not find thread.h or stubs header"
 fi
 
+# CRITICAL: Patch thread.c to run callbacks synchronously in Emscripten
+# This is what makes strings work - rz_th_new must execute callback immediately
+print_status "Patching librz/util/thread.c for Emscripten (synchronous execution)..."
+THREAD_C="${RIZIN_DIR}/librz/util/thread.c"
+if [ -f "$THREAD_C" ]; then
+    # Patch rz_th_self to return 0 for Emscripten
+    sed -i 's|#pragma message("Not implemented on this platform")|#elif defined(__EMSCRIPTEN__)\n\treturn (RZ_TH_TID)0;|g' "$THREAD_C"
+    
+    # Use awk to patch rz_th_new to run synchronously for Emscripten
+    # Find the RZ_LOG_ERROR line and add Emscripten block before it
+    awk '
+    /RZ_LOG_ERROR\("thread: Failed to start the RzThread/ {
+        print "#elif defined(__EMSCRIPTEN__)"
+        print "\t/* Emscripten: Run callback synchronously instead of spawning thread */"
+        print "\tth->terminated = false;"
+        print "\tth->retv = th->function(th->user);"
+        print "\tth->terminated = true;"
+        print "\treturn th;"
+        print "#endif"
+        print $0
+        next
+    }
+    { print }
+    ' "$THREAD_C" > "${THREAD_C}.patched"
+    mv "${THREAD_C}.patched" "$THREAD_C"
+    
+    # Patch rz_th_wait to return true for Emscripten (already complete)
+    sed -i 's|return WaitForSingleObject(th->tid, INFINITE) == 0;|return WaitForSingleObject(th->tid, INFINITE) == 0;\n#elif defined(__EMSCRIPTEN__)\n\t/* Already executed synchronously */\n\treturn true;|g' "$THREAD_C"
+    
+    print_success "Patched thread.c for Emscripten synchronous execution"
+fi
+
+# Patch thread_lock.c to be no-ops for Emscripten (single-threaded)
+print_status "Patching librz/util/thread_lock.c for Emscripten..."
+THREAD_LOCK_C="${RIZIN_DIR}/librz/util/thread_lock.c"
+if [ -f "$THREAD_LOCK_C" ]; then
+    # Patch rz_th_lock_new
+    sed -i 's|#elif __WINDOWS__|#elif defined(__EMSCRIPTEN__)\n\t/* Single-threaded: no locking needed */\n#elif __WINDOWS__|g' "$THREAD_LOCK_C"
+    
+    # Patch lock enter/leave/tryenter to be no-ops
+    sed -i 's|pthread_mutex_lock(\&thl->lock);|pthread_mutex_lock(\&thl->lock);\n#elif defined(__EMSCRIPTEN__)\n\t/* Single-threaded: no-op */|g' "$THREAD_LOCK_C"
+    sed -i 's|return !pthread_mutex_trylock(\&thl->lock);|return !pthread_mutex_trylock(\&thl->lock);\n#elif defined(__EMSCRIPTEN__)\n\treturn true; /* Single-threaded: always succeed */|g' "$THREAD_LOCK_C"
+    sed -i 's|pthread_mutex_unlock(\&thl->lock);|pthread_mutex_unlock(\&thl->lock);\n#elif defined(__EMSCRIPTEN__)\n\t/* Single-threaded: no-op */|g' "$THREAD_LOCK_C"
+    sed -i 's|pthread_mutex_destroy(\&thl->lock);|pthread_mutex_destroy(\&thl->lock);\n#elif defined(__EMSCRIPTEN__)\n\t/* Single-threaded: no-op */|g' "$THREAD_LOCK_C"
+    
+    print_success "Patched thread_lock.c for Emscripten"
+fi
+
+# Patch thread_sem.c for Emscripten
+print_status "Patching librz/util/thread_sem.c for Emscripten..."
+THREAD_SEM_C="${RIZIN_DIR}/librz/util/thread_sem.c"
+if [ -f "$THREAD_SEM_C" ]; then
+    # Make semaphore functions no-ops for single-threaded Emscripten
+    sed -i 's|#if HAVE_PTHREAD|#if defined(__EMSCRIPTEN__)\n\t/* Single-threaded stubs */\n\treturn RZ_NEW0(RzThreadSem);\n#elif HAVE_PTHREAD|g' "$THREAD_SEM_C"
+    print_success "Patched thread_sem.c for Emscripten"
+fi
+
+# Patch thread_cond.c for Emscripten
+print_status "Patching librz/util/thread_cond.c for Emscripten..."
+THREAD_COND_C="${RIZIN_DIR}/librz/util/thread_cond.c"
+if [ -f "$THREAD_COND_C" ]; then
+    sed -i 's|#if HAVE_PTHREAD|#if defined(__EMSCRIPTEN__)\n\treturn RZ_NEW0(RzThreadCond);\n#elif HAVE_PTHREAD|g' "$THREAD_COND_C"
+    print_success "Patched thread_cond.c for Emscripten"
+fi
+
 # Step 3: Clean build directory and run full meson setup
 print_status "Configuring Rizin..."
 rm -rf "${BUILD_DIR}"
