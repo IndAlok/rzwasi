@@ -242,20 +242,18 @@ done
 print_success "Removed pthread flags from all ninja files"
 
 # Step 4: Patch generated rz_userconf.h to disable Emscripten-incompatible features
-# We keep HAVE_PTHREAD=1 as Emscripten supports it (with -pthread flag passed to both compiler and linker)
 print_status "Patching rz_userconf.h for Emscripten..."
 USERCONF="${BUILD_DIR}/rz_userconf.h"
 if [ -f "$USERCONF" ]; then
     # Disable fork (not available in WASM)
     sed -i 's/#define HAVE_FORK.*1/#define HAVE_FORK 0/g' "$USERCONF"
-    # Enable HAVE_BACKTRACE (we implemented it in sys.c)
-    # sed -i 's/#define HAVE_BACKTRACE.*1/#define HAVE_BACKTRACE 0/g' "$USERCONF"
+    # CRITICAL: Disable pthread (we removed -pthread linker flags, so threads don't work)
+    sed -i 's/#define HAVE_PTHREAD.*1/#define HAVE_PTHREAD 0/g' "$USERCONF"
     # Disable PTY functions (not available in WASM)
     sed -i 's/#define HAVE_OPENPTY.*1/#define HAVE_OPENPTY 0/g' "$USERCONF"
     sed -i 's/#define HAVE_FORKPTY.*1/#define HAVE_FORKPTY 0/g' "$USERCONF"
     sed -i 's/#define HAVE_LOGIN_TTY.*1/#define HAVE_LOGIN_TTY 0/g' "$USERCONF"
     # Disable jemalloc heap analysis (jemalloc internals use types not available in Emscripten)
-    # This does NOT affect Rizin's own memory allocator, only the debugging of external jemalloc heaps
     sed -i 's/#define HAVE_JEMALLOC.*1/#define HAVE_JEMALLOC 0/g' "$USERCONF"
     print_success "Patched rz_userconf.h"
 fi
