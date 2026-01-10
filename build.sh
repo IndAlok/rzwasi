@@ -198,6 +198,26 @@ if [ -f "$SYS_C" ]; then
     print_success "Patched librz/util/sys.c for WASM backtrace"
 fi
 
+# CRITICAL: Patch thread.h to add Emscripten stub types
+# Without this, the build fails with "#error Threading library only supported for pthread and w32"
+print_status "Patching librz/util/thread.h for Emscripten..."
+THREAD_H="${RIZIN_DIR}/librz/util/thread.h"
+if [ -f "$THREAD_H" ]; then
+    # Replace the #error with Emscripten stub types
+    sed -i 's|#error Threading library only supported for pthread and w32|#ifdef __EMSCRIPTEN__\
+/* Emscripten single-threaded stubs */\
+typedef int RZ_TH_TID;\
+typedef int RZ_TH_LOCK_T;\
+typedef int RZ_TH_COND_T;\
+typedef int RZ_TH_SEM_T;\
+typedef void* RZ_TH_RET_T;\
+#define RZ_TH_LOCAL\
+#else\
+#error Threading library only supported for pthread and w32\
+#endif|g' "$THREAD_H"
+    print_success "Patched thread.h with Emscripten stubs"
+fi
+
 # Step 3: Clean build directory and run full meson setup
 print_status "Configuring Rizin..."
 rm -rf "${BUILD_DIR}"
