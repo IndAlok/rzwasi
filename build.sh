@@ -91,14 +91,8 @@ print_status "Patching meson.build..."
 sed -i "s/have_lrt = not \['windows', 'darwin', 'openbsd', 'android', 'haiku'\]/have_lrt = not ['windows', 'darwin', 'openbsd', 'android', 'haiku', 'emscripten']/g" meson.build 2>/dev/null || true
 sed -i "s/have_ptrace = not \['windows', 'cygwin', 'sunos', 'haiku'\]/have_ptrace = not ['windows', 'cygwin', 'sunos', 'haiku', 'emscripten']/g" meson.build 2>/dev/null || true
 
-# CRITICAL: Disable threads dependency for Emscripten to avoid -pthread linker flag
-# The threads dependency adds -pthread which requires atomics/bulk-memory features in ALL object files
-# Since we compile without -pthread, linking with it causes the error:
-# "wasm-ld: error: --shared-memory is disallowed by X.o because it was not compiled with 'atomics' or 'bulk-memory' features"
-print_status "Patching threads dependency for Emscripten..."
-sed -i "s/th_dep = dependency('threads')/if host_machine.system() != 'emscripten'\n  th_dep = dependency('threads')\nelse\n  th_dep = dependency('', required: false)\nendif/g" meson.build 2>/dev/null || true
-# Alternative simpler patch - make threads optional on emscripten
-sed -i "s/dependency('threads')/dependency('threads', required: host_machine.system() != 'emscripten')/g" meson.build 2>/dev/null || true
+# NOTE: Threads dependency patching is done AFTER meson setup by modifying build.ninja directly
+# This is more reliable than trying to patch meson.build which has complex dependency detection
 
 # Step 1: Initial meson setup to download subprojects (may fail, that's ok)
 print_status "Downloading subprojects..."
@@ -226,6 +220,22 @@ meson setup "${BUILD_DIR}" \
     -Dcli=enabled \
     -Dportable=true \
     -Ddebugger=false
+
+# CRITICAL: Patch generated build.ninja to remove ALL pthread-related flags
+# Meson's threads dependency detection works even on Emscripten and there's no
+# clean way to disable it. Instead, we patch the generated ninja files to remove
+# all pthread-related linker flags after meson setup completes.
+print_status "Removing pthread flags from build.ninja files..."
+find "${BUILD_DIR}" -name "*.ninja" -type f | while read ninja_file; do
+    # Remove -pthread flag
+    sed -i 's/ -pthread//g' "$ninja_file"
+    # Remove -sPTHREAD_POOL_SIZE=N flags
+    sed -i 's/ -sPTHREAD_POOL_SIZE=[0-9]*//g' "$ninja_file"
+    # Remove --shared-memory related flags that require atomics
+    sed -i 's/ --shared-memory//g' "$ninja_file"
+    sed -i 's/ --import-memory//g' "$ninja_file"
+done
+print_success "Removed pthread flags from all ninja files"
 
 # Step 4: Patch generated rz_userconf.h to disable Emscripten-incompatible features
 # We keep HAVE_PTHREAD=1 as Emscripten supports it (with -pthread flag passed to both compiler and linker)
