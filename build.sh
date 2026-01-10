@@ -202,20 +202,29 @@ fi
 # Without this, the build fails with "#error Threading library only supported for pthread and w32"
 print_status "Patching librz/util/thread.h for Emscripten..."
 THREAD_H="${RIZIN_DIR}/librz/util/thread.h"
-if [ -f "$THREAD_H" ]; then
-    # Replace the #error with Emscripten stub types
-    sed -i 's|#error Threading library only supported for pthread and w32|#ifdef __EMSCRIPTEN__\
-/* Emscripten single-threaded stubs */\
-typedef int RZ_TH_TID;\
-typedef int RZ_TH_LOCK_T;\
-typedef int RZ_TH_COND_T;\
-typedef int RZ_TH_SEM_T;\
-typedef void* RZ_TH_RET_T;\
-#define RZ_TH_LOCAL\
-#else\
-#error Threading library only supported for pthread and w32\
-#endif|g' "$THREAD_H"
+STUBS_H="${SCRIPT_DIR}/patches/rz_emscripten_thread_stubs.h"
+
+if [ -f "$THREAD_H" ] && [ -f "$STUBS_H" ]; then
+    # Copy stubs header to Rizin include directory
+    cp "$STUBS_H" "${RIZIN_DIR}/librz/include/rz_emscripten_thread_stubs.h"
+    
+    # Use awk for reliable multi-line replacement
+    awk '
+    /#error Threading library only supported for pthread and w32/ {
+        print "#ifdef __EMSCRIPTEN__"
+        print "#include <rz_emscripten_thread_stubs.h>"
+        print "#else"
+        print $0
+        print "#endif"
+        next
+    }
+    { print }
+    ' "$THREAD_H" > "${THREAD_H}.patched"
+    mv "${THREAD_H}.patched" "$THREAD_H"
+    
     print_success "Patched thread.h with Emscripten stubs"
+else
+    print_error "Could not find thread.h or stubs header"
 fi
 
 # Step 3: Clean build directory and run full meson setup
