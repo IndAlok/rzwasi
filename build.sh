@@ -339,17 +339,19 @@ fi
 print_status "Patching librz/util/thread_sem.c for Emscripten..."
 THREAD_SEM_C="${RIZIN_DIR}/librz/util/thread_sem.c"
 if [ -f "$THREAD_SEM_C" ]; then
-    # Insert Emscripten check at start of first function
+    # Insert #elif defined(__EMSCRIPTEN__) before #endif in rz_th_sem_new
+    # This lets the struct be allocated but skips platform-specific init
     awk '
-    /rz_th_sem_new/ && !sem_new_seen { sem_new_seen = 1 }
-    /^#if HAVE_PTHREAD/ && sem_new_seen && !sem_patched {
-        print "#if defined(__EMSCRIPTEN__)"
-        print "\t/* Single-threaded stubs */"
-        print "\treturn RZ_NEW0(RzThreadSem);"
-        print "#elif HAVE_PTHREAD"
-        sem_patched = 1
-        next
+    /rz_th_sem_new/ { in_sem_new = 1 }
+    /rz_th_sem_free/ { in_sem_new = 0 }
+    
+    # In rz_th_sem_new, insert before #endif that closes the HAVE_PTHREAD/#elif __WINDOWS__ block
+    /^#endif$/ && in_sem_new == 1 && !sem_new_patched {
+        print "#elif defined(__EMSCRIPTEN__)"
+        print "\t/* Single-threaded: no semaphore init needed */"
+        sem_new_patched = 1
     }
+    
     { print }
     ' "$THREAD_SEM_C" > "${THREAD_SEM_C}.patched"
     mv "${THREAD_SEM_C}.patched" "$THREAD_SEM_C"
@@ -360,15 +362,17 @@ fi
 print_status "Patching librz/util/thread_cond.c for Emscripten..."
 THREAD_COND_C="${RIZIN_DIR}/librz/util/thread_cond.c"
 if [ -f "$THREAD_COND_C" ]; then
+    # Insert #elif defined(__EMSCRIPTEN__) before #endif in rz_th_cond_new
     awk '
-    /rz_th_cond_new/ && !cond_new_seen { cond_new_seen = 1 }
-    /^#if HAVE_PTHREAD/ && cond_new_seen && !cond_patched {
-        print "#if defined(__EMSCRIPTEN__)"
-        print "\treturn RZ_NEW0(RzThreadCond);"
-        print "#elif HAVE_PTHREAD"
-        cond_patched = 1
-        next
+    /rz_th_cond_new/ { in_cond_new = 1 }
+    /rz_th_cond_signal/ { in_cond_new = 0 }
+    
+    /^#endif$/ && in_cond_new == 1 && !cond_new_patched {
+        print "#elif defined(__EMSCRIPTEN__)"
+        print "\t/* Single-threaded: no condition var init needed */"
+        cond_new_patched = 1
     }
+    
     { print }
     ' "$THREAD_COND_C" > "${THREAD_COND_C}.patched"
     mv "${THREAD_COND_C}.patched" "$THREAD_COND_C"
