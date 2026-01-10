@@ -77,7 +77,11 @@ ranlib = 'emranlib'
 # Web Workers cannot be loaded cross-origin, which breaks our split architecture
 # (rizin.js bundled locally, rizin.wasm loaded from GitHub Pages)
 c_args = ['-Os', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-D__EMSCRIPTEN__=1']
-c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=33554432', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0', '-sMODULARIZE=0', '-sEXPORT_ES6=0']
+# CRITICAL EXPORTS:
+# - FS: Filesystem access for mounting files
+# - callMain: Allow JavaScript to start the program
+# - stdin/stdout handling via print/printErr
+c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=33554432', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0', '-sMODULARIZE=0', '-sEXPORT_ES6=0', '-sEXPORTED_RUNTIME_METHODS=FS,callMain,print,printErr,getTempRet0,setTempRet0', '-sINVOKE_RUN=0', '-sFORCE_FILESYSTEM=1', '-sEXIT_RUNTIME=1']
 
 [host_machine]
 system = 'emscripten'
