@@ -73,11 +73,11 @@ strip = 'emstrip'
 ranlib = 'emranlib'
 
 [built-in options]
-# CRITICAL: -pthread must be in BOTH c_args AND c_link_args
-# This ensures ALL object files are compiled with atomics/bulk-memory features
-# Without this, wasm-ld fails with "--shared-memory is disallowed" errors
-c_args = ['-Os', '-pthread', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-D__EMSCRIPTEN__=1']
-c_link_args = ['-pthread', '-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=33554432', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0']
+# IMPORTANT: NO -pthread flag to avoid generating worker.js files
+# Web Workers cannot be loaded cross-origin, which breaks our split architecture
+# (rizin.js bundled locally, rizin.wasm loaded from GitHub Pages)
+c_args = ['-Os', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-D__EMSCRIPTEN__=1']
+c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=33554432', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0', '-sMODULARIZE=0', '-sEXPORT_ES6=0']
 
 [host_machine]
 system = 'emscripten'
