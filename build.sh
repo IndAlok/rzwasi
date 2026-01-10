@@ -91,6 +91,15 @@ print_status "Patching meson.build..."
 sed -i "s/have_lrt = not \['windows', 'darwin', 'openbsd', 'android', 'haiku'\]/have_lrt = not ['windows', 'darwin', 'openbsd', 'android', 'haiku', 'emscripten']/g" meson.build 2>/dev/null || true
 sed -i "s/have_ptrace = not \['windows', 'cygwin', 'sunos', 'haiku'\]/have_ptrace = not ['windows', 'cygwin', 'sunos', 'haiku', 'emscripten']/g" meson.build 2>/dev/null || true
 
+# CRITICAL: Disable threads dependency for Emscripten to avoid -pthread linker flag
+# The threads dependency adds -pthread which requires atomics/bulk-memory features in ALL object files
+# Since we compile without -pthread, linking with it causes the error:
+# "wasm-ld: error: --shared-memory is disallowed by X.o because it was not compiled with 'atomics' or 'bulk-memory' features"
+print_status "Patching threads dependency for Emscripten..."
+sed -i "s/th_dep = dependency('threads')/if host_machine.system() != 'emscripten'\n  th_dep = dependency('threads')\nelse\n  th_dep = dependency('', required: false)\nendif/g" meson.build 2>/dev/null || true
+# Alternative simpler patch - make threads optional on emscripten
+sed -i "s/dependency('threads')/dependency('threads', required: host_machine.system() != 'emscripten')/g" meson.build 2>/dev/null || true
+
 # Step 1: Initial meson setup to download subprojects (may fail, that's ok)
 print_status "Downloading subprojects..."
 meson subprojects download || true
