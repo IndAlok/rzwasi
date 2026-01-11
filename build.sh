@@ -228,54 +228,46 @@ else
 fi
 
 # CRITICAL: Patch thread.c to run callbacks synchronously in Emscripten
-# This is what makes strings work - rz_th_new must execute callback immediately
+# The key is to check __EMSCRIPTEN__ FIRST, BEFORE HAVE_PTHREAD
+# because Emscripten may define HAVE_PTHREAD but pthread_create hangs
 print_status "Patching librz/util/thread.c for Emscripten (synchronous execution)..."
 THREAD_C="${RIZIN_DIR}/librz/util/thread.c"
 if [ -f "$THREAD_C" ]; then
-    # Use awk for all patches - it's more reliable for multi-line changes
-    awk '
-    # Patch rz_th_self: insert #elif before the #else
-    /^#else$/ && in_rz_th_self == 1 {
-        print "#elif defined(__EMSCRIPTEN__)"
-        print "\treturn (RZ_TH_TID)0;"
-        in_rz_th_self = 0
+    # Use sed for simpler pattern-based replacements
+    # Replace "#if HAVE_PTHREAD" with "#if defined(__EMSCRIPTEN__)" followed by our code
+    # then "#elif HAVE_PTHREAD"
+    
+    # Patch rz_th_new: Change "#if HAVE_PTHREAD" to check Emscripten first
+    sed -i '
+    /RZ_API RZ_OWN RzThread \*rz_th_new/,/^}$/ {
+        s/#if HAVE_PTHREAD/#if defined(__EMSCRIPTEN__)\
+	\/* Emscripten: Run callback synchronously *\/\
+	th->terminated = false;\
+	th->retv = th->function(th->user);\
+	th->terminated = true;\
+	return th;\
+#elif HAVE_PTHREAD/
     }
+    ' "$THREAD_C"
     
-    # Track when we enter rz_th_self function
-    /RZ_IPI RZ_TH_TID rz_th_self/ { in_rz_th_self = 1 }
-    
-    # Track when we enter rz_th_new function
-    /RZ_API RZ_OWN RzThread \*rz_th_new/ { in_rz_th_new = 1 }
-    
-    # Patch rz_th_new: insert Emscripten block before #endif followed by RZ_LOG_ERROR
-    # We need to insert BEFORE the #endif that closes the #if HAVE_PTHREAD/#elif __WINDOWS__ block
-    /^#endif$/ && in_rz_th_new == 1 && !rz_th_new_patched {
-        print "#elif defined(__EMSCRIPTEN__)"
-        print "\t/* Emscripten: Run callback synchronously instead of spawning thread */"
-        print "\tth->terminated = false;"
-        print "\tth->retv = th->function(th->user);"
-        print "\tth->terminated = true;"
-        print "\treturn th;"
-        rz_th_new_patched = 1
+    # Patch rz_th_wait: Change "#if HAVE_PTHREAD" to check Emscripten first  
+    sed -i '
+    /RZ_API bool rz_th_wait/,/^}$/ {
+        s/#if HAVE_PTHREAD/#if defined(__EMSCRIPTEN__)\
+	\/* Already executed synchronously *\/\
+	return true;\
+#elif HAVE_PTHREAD/
     }
+    ' "$THREAD_C"
     
-    # Track when we enter rz_th_wait function  
-    /RZ_API bool rz_th_wait/ { in_rz_th_wait = 1; in_rz_th_new = 0 }
-    
-    # Patch rz_th_wait: insert before #endif
-    /^#endif$/ && in_rz_th_wait == 1 && !rz_th_wait_patched {
-        print "#elif defined(__EMSCRIPTEN__)"
-        print "\t/* Already executed synchronously */"
-        print "\treturn true;"
-        rz_th_wait_patched = 1
+    # Patch rz_th_self: Insert Emscripten check
+    sed -i '
+    /RZ_IPI RZ_TH_TID rz_th_self/,/^}$/ {
+        s/#if HAVE_PTHREAD/#if defined(__EMSCRIPTEN__)\
+	return (RZ_TH_TID)0;\
+#elif HAVE_PTHREAD/
     }
-    
-    # End of rz_th_wait on next function
-    /RZ_API void rz_th_free/ { in_rz_th_wait = 0 }
-    
-    { print }
-    ' "$THREAD_C" > "${THREAD_C}.patched"
-    mv "${THREAD_C}.patched" "$THREAD_C"
+    ' "$THREAD_C"
     
     print_success "Patched thread.c for Emscripten synchronous execution"
 fi
