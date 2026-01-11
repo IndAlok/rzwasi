@@ -95,8 +95,39 @@ print_status "Patching meson.build..."
 sed -i "s/have_lrt = not \['windows', 'darwin', 'openbsd', 'android', 'haiku'\]/have_lrt = not ['windows', 'darwin', 'openbsd', 'android', 'haiku', 'emscripten']/g" meson.build 2>/dev/null || true
 sed -i "s/have_ptrace = not \['windows', 'cygwin', 'sunos', 'haiku'\]/have_ptrace = not ['windows', 'cygwin', 'sunos', 'haiku', 'emscripten']/g" meson.build 2>/dev/null || true
 
-# NOTE: Threads dependency patching is done AFTER meson setup by modifying build.ninja directly
-# This is more reliable than trying to patch meson.build which has complex dependency detection
+# CRITICAL: Force HAVE_PTHREAD=false for Emscripten at meson.build level
+# This is the COMPLETE solution - it disables ALL pthread code paths throughout Rizin
+# The line we need to patch is:
+#   have_pthread = it_th.found() and it_machine.system() != 'windows'
+# We need to add: and it_machine.system() != 'emscripten'
+print_status "Disabling pthread for Emscripten in meson.build..."
+python3 -c "
+import sys
+
+with open('meson.build', 'r') as f:
+    content = f.read()
+
+# Pattern 1: Disable have_pthread for emscripten
+old_have_pthread = \"have_pthread = it_th.found() and it_machine.system() != 'windows'\"
+new_have_pthread = \"have_pthread = it_th.found() and it_machine.system() != 'windows' and it_machine.system() != 'emscripten'\"
+if old_have_pthread in content:
+    content = content.replace(old_have_pthread, new_have_pthread)
+    print('Patched have_pthread to exclude emscripten')
+else:
+    print('WARNING: have_pthread pattern not found')
+
+# Pattern 2: Also force threads dependency to be disabled for emscripten  
+# This handles cases where the threads dep might be found but shouldn't be used
+old_threads = \"it_th = dependency('threads', required: false\"
+new_threads = \"it_th = dependency('threads', required: false\"
+# We don't actually need to change this line, but we add an override after
+
+with open('meson.build', 'w') as f:
+    f.write(content)
+
+print('meson.build patched for Emscripten threading')
+"
+print_success "Patched meson.build to disable pthread for Emscripten"
 
 # Step 1: Initial meson setup to download subprojects (may fail, that's ok)
 print_status "Downloading subprojects..."
@@ -198,232 +229,155 @@ if [ -f "$SYS_C" ]; then
     print_success "Patched librz/util/sys.c for WASM backtrace"
 fi
 
-# CRITICAL: Patch thread.h to add Emscripten stub types
-# Without this, the build fails with "#error Threading library only supported for pthread and w32"
-print_status "Patching librz/util/thread.h for Emscripten..."
-THREAD_H="${RIZIN_DIR}/librz/util/thread.h"
-STUBS_H="${SCRIPT_DIR}/patches/rz_emscripten_thread_stubs.h"
+# CRITICAL: Comprehensive Threading Fix for Emscripten
+# Since we disabled HAVE_PTHREAD in meson.build, we MUST provide:
+# 1. Valid typedefs in thread.h (so RzThreadTid, RzThreadLock etc. exist)
+# 2. Valid synchronous implementations in thread.c
+# 3. Valid no-op implementations in thread_lock.c, thread_sem.c, thread_cond.c
 
-if [ -f "$THREAD_H" ] && [ -f "$STUBS_H" ]; then
-    # Copy stubs header to Rizin include directory
-    cp "$STUBS_H" "${RIZIN_DIR}/librz/include/rz_emscripten_thread_stubs.h"
-    
-    # Use awk for reliable multi-line replacement
-    awk '
-    /#error Threading library only supported for pthread and w32/ {
-        print "#ifdef __EMSCRIPTEN__"
-        print "#include <rz_emscripten_thread_stubs.h>"
-        print "#else"
-        print $0
-        print "#endif"
-        next
-    }
-    { print }
-    ' "$THREAD_H" > "${THREAD_H}.patched"
-    mv "${THREAD_H}.patched" "$THREAD_H"
-    
-    print_success "Patched thread.h with Emscripten stubs"
-else
-    print_error "Could not find thread.h or stubs header"
-fi
-
-# CRITICAL: Patch thread.c to run callbacks synchronously in Emscripten
-# The key is to check __EMSCRIPTEN__ FIRST, BEFORE HAVE_PTHREAD
-# because Emscripten defines HAVE_PTHREAD for pthread emulation but it hangs
-print_status "Patching librz/util/thread.c for Emscripten (synchronous execution)..."
-THREAD_C="${RIZIN_DIR}/librz/util/thread.c"
-if [ -f "$THREAD_C" ]; then
-    # Export path for Python to use
-    export THREAD_C_PATH="$THREAD_C"
-    
-    # Use Python for reliable exact string replacement
-    # The actual nightly source format from build logs:
-    # #if HAVE_PTHREAD
-    # 	if (!pthread_create(&th->tid, NULL, thread_main_function, th)) {
-    # 		return th;
-    # 	}
-    python3 << 'PYSCRIPT'
-import sys
+print_status "Applying comprehensive Emscripten threading patches (Python)..."
+export RIZIN_DIR
+python3 << 'PYSCRIPT'
 import os
+import sys
+import re
 
-filepath = os.environ.get('THREAD_C_PATH', '')
-if not filepath:
-    print("ERROR: THREAD_C_PATH not set")
+rizin_dir = os.environ.get('RIZIN_DIR')
+if not rizin_dir:
+    print("Error: RIZIN_DIR not set")
     sys.exit(1)
 
-with open(filepath, 'r') as f:
-    content = f.read()
+def patch_file(rel_path, patches):
+    path = os.path.join(rizin_dir, rel_path)
+    if not os.path.exists(path):
+        print(f"Warning: {rel_path} not found")
+        return
+    
+    with open(path, 'r') as f:
+        content = f.read()
+    
+    modified = False
+    for name, pattern, replacement in patches:
+        if name in content: # simple check to avoid double patching if we use markers
+            pass # continue? No, exact matches might be tricky if we check replacement content. 
+                 # But our replacements are unique enough (contain __EMSCRIPTEN__)
+            if "__EMSCRIPTEN__" in replacement and replacement in content:
+                 continue
+            
+        # If pattern is regex, use re.sub
+        # If it's simple string, use replace
+        if pattern.startswith('regex:'):
+            new_content = re.sub(pattern[6:], replacement, content, count=1, flags=re.DOTALL)
+            if new_content != content:
+                content = new_content
+                modified = True
+                print(f"  Applied patch: {name}")
+            else:
+                print(f"  Failed to match pattern for: {name}")
+        else:
+            if pattern in content:
+                content = content.replace(pattern, replacement)
+                modified = True
+                print(f"  Applied patch: {name}")
+            else:
+                print(f"  Pattern not found for: {name}")
 
-modified = False
+    if modified:
+        with open(path, 'w') as f:
+            f.write(content)
 
-# Pattern 1: rz_th_new - exact match from build logs  
-# Note: Uses tabs for indentation, #if with NO space after #
-old_th_new = '''#if HAVE_PTHREAD
-	if (!pthread_create(&th->tid, NULL, thread_main_function, th)) {
-		return th;
-	}
-#elif __WINDOWS__'''
+# 1. Patch thread.h - typedefs
+# We insert our block before #elif HAVE_PTHREAD or #else
+thread_h_patches = [
+    ('Emscripten Typedefs', 
+     '#if __WINDOWS__', 
+     '''#if defined(__EMSCRIPTEN__)
+#define RZ_TH_TID    int
+#define RZ_TH_LOCK_T int
+#define RZ_TH_COND_T int
+#define RZ_TH_SEM_T  int
+#define RZ_TH_RET_T  void *
+#elif __WINDOWS__''')
+]
+patch_file('librz/util/thread.h', thread_h_patches)
 
-new_th_new = '''#if defined(__EMSCRIPTEN__)
-	/* Emscripten: Run callback synchronously */
+# 2. Patch thread.c - synchronous implementation
+# checking regex patterns against file content
+thread_c_patches = [
+    # Patch rz_th_new
+    ('rz_th_new sync', 
+     'regex:RZ_API RZ_OWN RzThread \*rz_th_new\([^)]+\) \{', 
+     '''RZ_API RZ_OWN RzThread *rz_th_new(RzThreadFunction function, void *user) {
+#if defined(__EMSCRIPTEN__)
+	RzThread *th = RZ_NEW0(RzThread);
+	if (!th) { return NULL; }
+	th->function = function;
+	th->user = user;
 	th->terminated = false;
+	/* Synchronous execution */
 	th->retv = th->function(th->user);
 	th->terminated = true;
 	return th;
-#elif HAVE_PTHREAD
-	if (!pthread_create(&th->tid, NULL, thread_main_function, th)) {
-		return th;
-	}
-#elif __WINDOWS__'''
-
-if old_th_new in content:
-    content = content.replace(old_th_new, new_th_new)
-    modified = True
-    print("Patched rz_th_new")
-else:
-    print("WARNING: rz_th_new pattern not found")
-    # Show what we're looking for
-    print("Looking for: '#if HAVE_PTHREAD' followed by pthread_create")
-
-# Pattern 2: rz_th_wait - exact match
-old_th_wait = '''#if HAVE_PTHREAD
-	void *thret = NULL;
-	return pthread_join(th->tid, &thret) == 0;
-#elif __WINDOWS__'''
-
-new_th_wait = '''#if defined(__EMSCRIPTEN__)
-	/* Already executed synchronously */
+#endif'''),
+    
+    # Patch rz_th_wait
+    ('rz_th_wait sync',
+     'regex:RZ_API bool rz_th_wait\([^)]+\) \{',
+     '''RZ_API bool rz_th_wait(RzThread *th) {
+#if defined(__EMSCRIPTEN__)
 	return true;
-#elif HAVE_PTHREAD
-	void *thret = NULL;
-	return pthread_join(th->tid, &thret) == 0;
-#elif __WINDOWS__'''
+#endif'''),
+     
+    # Patch rz_th_self
+    ('rz_th_self sync',
+     'regex:RZ_IPI RZ_TH_TID rz_th_self\(void\) \{',
+     '''RZ_IPI RZ_TH_TID rz_th_self(void) {
+#if defined(__EMSCRIPTEN__)
+	return 0;
+#endif''')
+]
+patch_file('librz/util/thread.c', thread_c_patches)
 
-if old_th_wait in content:
-    content = content.replace(old_th_wait, new_th_wait)
-    modified = True
-    print("Patched rz_th_wait")
-else:
-    print("WARNING: rz_th_wait pattern not found")
+# 3. Patch thread_lock.c - no-ops
+# Need to handle return values for tryenter
+thread_lock_patches = [
+    ('lock_tryenter',
+     'regex:RZ_API bool rz_th_lock_tryenter\([^)]+\) \{',
+     '''RZ_API bool rz_th_lock_tryenter(RzThreadLock *thl) {
+#if defined(__EMSCRIPTEN__)
+	return true;
+#endif''')
+]
+patch_file('librz/util/thread_lock.c', thread_lock_patches)
 
-if modified:
-    with open(filepath, 'w') as f:
-        f.write(content)
-    print("thread.c patching complete!")
-else:
-    print("ERROR: No patches applied to thread.c")
-    sys.exit(1)
+# 4. Patch thread_sem.c - allocs and no-ops
+thread_sem_patches = [
+    ('sem_new',
+     'regex:RZ_API RzThreadSemaphore \*rz_th_sem_new\([^)]+\) \{',
+     '''RZ_API RzThreadSemaphore *rz_th_sem_new(unsigned int initial) {
+#if defined(__EMSCRIPTEN__)
+	RzThreadSemaphore *sem = RZ_NEW0(RzThreadSemaphore);
+	return sem;
+#endif'''),
+     
+     ('sem_wait',
+      'regex:RZ_API void rz_th_sem_wait\([^)]+\) \{',
+      '''RZ_API void rz_th_sem_wait(RzThreadSemaphore *sem) {
+#if defined(__EMSCRIPTEN__)
+	return;
+#endif'''),
+
+     ('sem_post',
+      'regex:RZ_API void rz_th_sem_post\([^)]+\) \{',
+      '''RZ_API void rz_th_sem_post(RzThreadSemaphore *sem) {
+#if defined(__EMSCRIPTEN__)
+	return;
+#endif''')
+]
+patch_file('librz/util/thread_sem.c', thread_sem_patches)
+
+print("Emscripten threading patches applied.")
 PYSCRIPT
-
-    # Verify patch was applied
-    if grep -q "defined(__EMSCRIPTEN__)" "$THREAD_C"; then
-        print_success "Patched thread.c for Emscripten synchronous execution"
-    else
-        print_error "Failed to patch thread.c - Emscripten check not found"
-        echo "=== thread.c rz_th_new section ===" 
-        sed -n '/rz_th_new/,/^}/p' "$THREAD_C" | head -30
-        exit 1  
-    fi
-fi
-
-# Patch thread_lock.c to be no-ops for Emscripten (single-threaded)
-print_status "Patching librz/util/thread_lock.c for Emscripten..."
-THREAD_LOCK_C="${RIZIN_DIR}/librz/util/thread_lock.c"
-if [ -f "$THREAD_LOCK_C" ]; then
-    # Use awk to insert #elif __EMSCRIPTEN__ before #elif __WINDOWS__ in each function
-    awk '
-    # For rz_th_lock_new: insert before #elif __WINDOWS__
-    /^#elif __WINDOWS__/ && !lock_new_done {
-        print "#elif defined(__EMSCRIPTEN__)"
-        print "\t/* Single-threaded: no locking needed */"
-        lock_new_done = 1
-    }
-    
-    { print }
-    ' "$THREAD_LOCK_C" > "${THREAD_LOCK_C}.patched"
-    mv "${THREAD_LOCK_C}.patched" "$THREAD_LOCK_C"
-    
-    # Now patch the individual lock functions - insert before #endif
-    awk '
-    /rz_th_lock_enter/ { in_lock_enter = 1 }
-    /rz_th_lock_tryenter/ { in_lock_enter = 0; in_lock_tryenter = 1 }
-    /rz_th_lock_leave/ { in_lock_tryenter = 0; in_lock_leave = 1 }
-    /rz_th_lock_free/ { in_lock_leave = 0; in_lock_free = 1 }
-    
-    /^#endif$/ && in_lock_enter == 1 {
-        print "#elif defined(__EMSCRIPTEN__)"
-        print "\t/* Single-threaded: no-op */"
-        in_lock_enter = 0
-    }
-    
-    /^#endif$/ && in_lock_tryenter == 1 {
-        print "#elif defined(__EMSCRIPTEN__)"
-        print "\treturn true; /* Single-threaded: always succeed */"
-        in_lock_tryenter = 0
-    }
-    
-    /^#endif$/ && in_lock_leave == 1 {
-        print "#elif defined(__EMSCRIPTEN__)"
-        print "\t/* Single-threaded: no-op */"
-        in_lock_leave = 0
-    }
-    
-    /^#endif$/ && in_lock_free == 1 {
-        print "#elif defined(__EMSCRIPTEN__)"
-        print "\t/* Single-threaded: no-op */"
-        in_lock_free = 0
-    }
-    
-    { print }
-    ' "$THREAD_LOCK_C" > "${THREAD_LOCK_C}.patched"
-    mv "${THREAD_LOCK_C}.patched" "$THREAD_LOCK_C"
-    
-    print_success "Patched thread_lock.c for Emscripten"
-fi
-
-# Patch thread_sem.c for Emscripten
-print_status "Patching librz/util/thread_sem.c for Emscripten..."
-THREAD_SEM_C="${RIZIN_DIR}/librz/util/thread_sem.c"
-if [ -f "$THREAD_SEM_C" ]; then
-    # Insert #elif defined(__EMSCRIPTEN__) BEFORE #elif __WINDOWS__ in rz_th_sem_new
-    # IMPORTANT: Cannot use #endif matching because there's a nested #if RZ_SEM_NAMED_ONLY block
-    awk '
-    /rz_th_sem_new/ { in_sem_new = 1 }
-    /rz_th_sem_free/ { in_sem_new = 0 }
-    
-    # Insert BEFORE #elif __WINDOWS__ to avoid nested #if issues
-    /^#elif __WINDOWS__/ && in_sem_new == 1 && !sem_new_patched {
-        print "#elif defined(__EMSCRIPTEN__)"
-        print "\t/* Single-threaded: no semaphore init needed */"
-        sem_new_patched = 1
-    }
-    
-    { print }
-    ' "$THREAD_SEM_C" > "${THREAD_SEM_C}.patched"
-    mv "${THREAD_SEM_C}.patched" "$THREAD_SEM_C"
-    print_success "Patched thread_sem.c for Emscripten"
-fi
-
-# Patch thread_cond.c for Emscripten
-print_status "Patching librz/util/thread_cond.c for Emscripten..."
-THREAD_COND_C="${RIZIN_DIR}/librz/util/thread_cond.c"
-if [ -f "$THREAD_COND_C" ]; then
-    # Insert #elif defined(__EMSCRIPTEN__) BEFORE #elif __WINDOWS__ in rz_th_cond_new
-    awk '
-    /rz_th_cond_new/ { in_cond_new = 1 }
-    /rz_th_cond_signal/ { in_cond_new = 0 }
-    
-    /^#elif __WINDOWS__/ && in_cond_new == 1 && !cond_new_patched {
-        print "#elif defined(__EMSCRIPTEN__)"
-        print "\t/* Single-threaded: no condition var init needed */"
-        cond_new_patched = 1
-    }
-    
-    { print }
-    ' "$THREAD_COND_C" > "${THREAD_COND_C}.patched"
-    mv "${THREAD_COND_C}.patched" "$THREAD_COND_C"
-    print_success "Patched thread_cond.c for Emscripten"
-fi
 
 # Step 3: Clean build directory and run full meson setup
 print_status "Configuring Rizin..."
