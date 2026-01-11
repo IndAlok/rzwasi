@@ -234,41 +234,62 @@ print_status "Patching librz/util/thread.c for Emscripten (synchronous execution
 THREAD_C="${RIZIN_DIR}/librz/util/thread.c"
 if [ -f "$THREAD_C" ]; then
     # Use Python for reliable multi-line text replacement
-    # Pass the file path as an argument
+    # IMPORTANT: Rizin source uses "# if HAVE_PTHREAD" with a SPACE after #
     python3 -c "
 import sys
 filepath = sys.argv[1]
 with open(filepath, 'r') as f:
     content = f.read()
 
+modified = False
+
 # Patch rz_th_new: Add Emscripten case FIRST
-old_rz_th_new = '#if HAVE_PTHREAD\n\tif (!pthread_create(&th->tid, NULL, thread_main_function, th)) {\n\t\treturn th;\n\t}'
-new_rz_th_new = '''#if defined(__EMSCRIPTEN__)
+# Note: Rizin uses '# if HAVE_PTHREAD' with space after #
+old_rz_th_new = '''# if HAVE_PTHREAD
+if (!pthread_create(&th->tid, NULL, thread_main_function, th)) {
+\t\treturn th;
+\t}'''
+new_rz_th_new = '''# if defined(__EMSCRIPTEN__)
 \t/* Emscripten: Run callback synchronously */
 \tth->terminated = false;
 \tth->retv = th->function(th->user);
 \tth->terminated = true;
 \treturn th;
-#elif HAVE_PTHREAD
-\tif (!pthread_create(&th->tid, NULL, thread_main_function, th)) {
+# elif HAVE_PTHREAD
+if (!pthread_create(&th->tid, NULL, thread_main_function, th)) {
 \t\treturn th;
 \t}'''
-content = content.replace(old_rz_th_new, new_rz_th_new)
+if old_rz_th_new in content:
+    content = content.replace(old_rz_th_new, new_rz_th_new)
+    modified = True
+    print('Patched rz_th_new')
+else:
+    print('WARNING: Could not find rz_th_new pattern')
 
 # Patch rz_th_wait: Add Emscripten case FIRST
-old_rz_th_wait = '#if HAVE_PTHREAD\n\tvoid *thret = NULL;\n\treturn pthread_join(th->tid, &thret) == 0;'
-new_rz_th_wait = '''#if defined(__EMSCRIPTEN__)
+old_rz_th_wait = '''# if HAVE_PTHREAD
+void *thret = NULL;
+\treturn pthread_join(th->tid, &thret) == 0;'''
+new_rz_th_wait = '''# if defined(__EMSCRIPTEN__)
 \t/* Already executed synchronously */
 \treturn true;
-#elif HAVE_PTHREAD
-\tvoid *thret = NULL;
+# elif HAVE_PTHREAD
+void *thret = NULL;
 \treturn pthread_join(th->tid, &thret) == 0;'''
-content = content.replace(old_rz_th_wait, new_rz_th_wait)
+if old_rz_th_wait in content:
+    content = content.replace(old_rz_th_wait, new_rz_th_wait)
+    modified = True
+    print('Patched rz_th_wait')
+else:
+    print('WARNING: Could not find rz_th_wait pattern')
 
-with open(filepath, 'w') as f:
-    f.write(content)
-
-print('Patched thread.c: rz_th_new and rz_th_wait')
+if modified:
+    with open(filepath, 'w') as f:
+        f.write(content)
+    print('thread.c patching complete')
+else:
+    print('ERROR: No patches applied!')
+    sys.exit(1)
 " "$THREAD_C"
     
     print_success "Patched thread.c for Emscripten synchronous execution"
