@@ -1,65 +1,59 @@
 # rzwasi
 
-Build Rizin for WebAssembly (WASI).
+Rizin WebAssembly build scripts using Emscripten.
 
-This repository provides scripts to compile [Rizin](https://rizin.re) to WebAssembly, enabling browser-based reverse engineering via projects like [rzweb](https://github.com/rizinorg/rzweb).
+## Overview
 
-## Quick Start
+This repository builds Rizin for WebAssembly using Emscripten, enabling browser-based binary analysis. The compiled WASM is used by rzweb to run Rizin in the browser.
 
-```bash
-# Install WASI SDK
-./setup.sh install
+## Build Process
 
-# Build Rizin WASM (default: v0.7.3)
-./build.sh
+The build script:
+1. Clones Rizin source from the official repository
+2. Applies patches for Emscripten compatibility (threading stubs)
+3. Compiles using Emscripten SDK
+4. Outputs rizin.js and rizin.wasm
 
-# Build specific version
-./build.sh -v 0.7.2
-```
+## Threading Patches
 
-Output files are in `dist/`:
-- `rizin.wasm` - Main Rizin binary
-- `rz-bin.wasm`, `rz-asm.wasm`, etc. - Additional tools
+Since Emscripten does not fully support pthreads in many environments, the build applies patches to:
+- thread.c - Makes rz_th_new run callbacks synchronously
+- thread_lock.c - Makes lock operations no-ops
+- thread_sem.c - Stubs semaphore operations
+- thread_cond.c - Stubs condition variable operations
 
-## Requirements
+This allows Rizin to run in single-threaded WASM mode.
 
-- Linux or macOS (Windows via WSL)
-- Bash, Git, curl/wget
-- Python 3 with pip
-- Meson, Ninja
+## GitHub Actions
+
+The repository includes a workflow that:
+1. Sets up Emscripten SDK
+2. Runs the build script
+3. Deploys output to GitHub Pages
+
+Output is available at: https://[username].github.io/rzwasi/
+
+## Output Files
+
+- rizin.js - Emscripten JavaScript loader
+- rizin.wasm - Compiled Rizin binary
 
 ## Usage
 
-```
-./build.sh [OPTIONS]
-
-Options:
-  -v, --version VER   Rizin version to build (default: 0.7.3)
-  -o, --output DIR    Output directory (default: ./dist)
-  -j, --jobs N        Parallel build jobs (default: auto)
-  -c, --clean         Clean build before starting
-  -h, --help          Show help
-```
-
-## CI/CD
-
-Push a tag to create a release:
+Trigger the "Build Rizin WASM" workflow in GitHub Actions, or run locally:
 
 ```bash
-git tag v0.7.3
-git push origin v0.7.3
+./build.sh
 ```
 
-The GitHub Actions workflow automatically builds and uploads the WASM files.
+Requires Emscripten SDK to be installed and activated.
 
-## Using with rzweb
+## Limitations
 
-Download releases from this repository and place in rzweb's `public/` folder:
-
-```bash
-curl -LO https://github.com/rizinorg/rzwasi/releases/download/v0.7.3/rizin-0.7.3-wasi.zip
-unzip rizin-0.7.3-wasi.zip -d rzweb/public/
-```
+- Single-threaded execution only
+- Some analysis features may be slower than native Rizin
+- Debugging features (-d flag) not available
+- Memory limited by browser constraints
 
 ## License
 
