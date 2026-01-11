@@ -233,66 +233,85 @@ fi
 print_status "Patching librz/util/thread.c for Emscripten (synchronous execution)..."
 THREAD_C="${RIZIN_DIR}/librz/util/thread.c"
 if [ -f "$THREAD_C" ]; then
-    # Use Python for reliable multi-line text replacement
-    # IMPORTANT: Rizin source uses "# if HAVE_PTHREAD" with a SPACE after #
-    python3 -c "
+    # Use Python with regex for flexible pattern matching
+    python3 << PYSCRIPT
+import re
 import sys
-filepath = sys.argv[1]
+
+filepath = "${THREAD_C}"
 with open(filepath, 'r') as f:
     content = f.read()
 
+original = content
 modified = False
 
-# Patch rz_th_new: Add Emscripten case FIRST
-# Note: Rizin uses '# if HAVE_PTHREAD' with space after #
-old_rz_th_new = '''# if HAVE_PTHREAD
-if (!pthread_create(&th->tid, NULL, thread_main_function, th)) {
-\t\treturn th;
-\t}'''
-new_rz_th_new = '''# if defined(__EMSCRIPTEN__)
+# Patch rz_th_new: Find "# if HAVE_PTHREAD" followed by pthread_create within rz_th_new function
+# Use regex to handle any whitespace variations
+pattern_new = r'(RZ_API RZ_OWN RzThread \*rz_th_new\([^}]+?)(#\s*if\s+HAVE_PTHREAD\s*\nif \(!pthread_create)'
+def replace_new(m):
+    return m.group(1) + """#if defined(__EMSCRIPTEN__)
 \t/* Emscripten: Run callback synchronously */
 \tth->terminated = false;
 \tth->retv = th->function(th->user);
 \tth->terminated = true;
 \treturn th;
-# elif HAVE_PTHREAD
-if (!pthread_create(&th->tid, NULL, thread_main_function, th)) {
-\t\treturn th;
-\t}'''
-if old_rz_th_new in content:
-    content = content.replace(old_rz_th_new, new_rz_th_new)
-    modified = True
-    print('Patched rz_th_new')
-else:
-    print('WARNING: Could not find rz_th_new pattern')
+#elif HAVE_PTHREAD
+if (!pthread_create"""
 
-# Patch rz_th_wait: Add Emscripten case FIRST
-old_rz_th_wait = '''# if HAVE_PTHREAD
-void *thret = NULL;
-\treturn pthread_join(th->tid, &thret) == 0;'''
-new_rz_th_wait = '''# if defined(__EMSCRIPTEN__)
+content, count = re.subn(pattern_new, replace_new, content, flags=re.DOTALL)
+if count > 0:
+    print(f"Patched rz_th_new ({count} replacement)")
+    modified = True
+else:
+    print("WARNING: Could not find rz_th_new pattern")
+
+# Patch rz_th_wait: Find "# if HAVE_PTHREAD" followed by void *thret within rz_th_wait function
+pattern_wait = r'(RZ_API bool rz_th_wait\([^}]+?)(#\s*if\s+HAVE_PTHREAD\s*\nvoid \*thret)'
+def replace_wait(m):
+    return m.group(1) + """#if defined(__EMSCRIPTEN__)
 \t/* Already executed synchronously */
 \treturn true;
-# elif HAVE_PTHREAD
-void *thret = NULL;
-\treturn pthread_join(th->tid, &thret) == 0;'''
-if old_rz_th_wait in content:
-    content = content.replace(old_rz_th_wait, new_rz_th_wait)
+#elif HAVE_PTHREAD
+void *thret"""
+
+content, count = re.subn(pattern_wait, replace_wait, content, flags=re.DOTALL)
+if count > 0:
+    print(f"Patched rz_th_wait ({count} replacement)")
     modified = True
-    print('Patched rz_th_wait')
 else:
-    print('WARNING: Could not find rz_th_wait pattern')
+    print("WARNING: Could not find rz_th_wait pattern")
 
 if modified:
     with open(filepath, 'w') as f:
         f.write(content)
-    print('thread.c patching complete')
+    print("thread.c patching complete!")
 else:
-    print('ERROR: No patches applied!')
-    sys.exit(1)
-" "$THREAD_C"
-    
-    print_success "Patched thread.c for Emscripten synchronous execution"
+    print("ERROR: No patches applied to thread.c")
+    # Don't exit with error - try alternative approach below
+
+PYSCRIPT
+
+    # Fallback: If Python regex failed, try simple sed approach  
+    if ! grep -q "defined(__EMSCRIPTEN__)" "$THREAD_C"; then
+        print_status "Python patch failed, trying sed fallback..."
+        # Insert Emscripten check before HAVE_PTHREAD in rz_th_new
+        sed -i '/rz_th_new/,/^}$/{
+            s/# if HAVE_PTHREAD/# if defined(__EMSCRIPTEN__)\n\t\/* Emscripten: sync *\/\n\tth->terminated = false;\n\tth->retv = th->function(th->user);\n\tth->terminated = true;\n\treturn th;\n# elif HAVE_PTHREAD/
+        }' "$THREAD_C"
+        sed -i '/rz_th_wait/,/^}$/{
+            s/# if HAVE_PTHREAD/# if defined(__EMSCRIPTEN__)\n\treturn true;\n# elif HAVE_PTHREAD/
+        }' "$THREAD_C"
+    fi
+
+    # Verify patch was applied
+    if grep -q "defined(__EMSCRIPTEN__)" "$THREAD_C"; then
+        print_success "Patched thread.c for Emscripten synchronous execution"
+    else
+        print_error "Failed to patch thread.c - Emscripten check not found"
+        echo "=== thread.c rz_th_new section ===" 
+        sed -n '/rz_th_new/,/^}/p' "$THREAD_C" | head -30
+        exit 1  
+    fi
 fi
 
 # Patch thread_lock.c to be no-ops for Emscripten (single-threaded)
