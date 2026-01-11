@@ -229,45 +229,47 @@ fi
 
 # CRITICAL: Patch thread.c to run callbacks synchronously in Emscripten
 # The key is to check __EMSCRIPTEN__ FIRST, BEFORE HAVE_PTHREAD
-# because Emscripten may define HAVE_PTHREAD but pthread_create hangs
+# because Emscripten defines HAVE_PTHREAD for pthread emulation but it hangs
 print_status "Patching librz/util/thread.c for Emscripten (synchronous execution)..."
 THREAD_C="${RIZIN_DIR}/librz/util/thread.c"
 if [ -f "$THREAD_C" ]; then
-    # Use sed for simpler pattern-based replacements
-    # Replace "#if HAVE_PTHREAD" with "#if defined(__EMSCRIPTEN__)" followed by our code
-    # then "#elif HAVE_PTHREAD"
-    
-    # Patch rz_th_new: Change "#if HAVE_PTHREAD" to check Emscripten first
-    sed -i '
-    /RZ_API RZ_OWN RzThread \*rz_th_new/,/^}$/ {
-        s/#if HAVE_PTHREAD/#if defined(__EMSCRIPTEN__)\
-	\/* Emscripten: Run callback synchronously *\/\
-	th->terminated = false;\
-	th->retv = th->function(th->user);\
-	th->terminated = true;\
-	return th;\
-#elif HAVE_PTHREAD/
-    }
-    ' "$THREAD_C"
-    
-    # Patch rz_th_wait: Change "#if HAVE_PTHREAD" to check Emscripten first  
-    sed -i '
-    /RZ_API bool rz_th_wait/,/^}$/ {
-        s/#if HAVE_PTHREAD/#if defined(__EMSCRIPTEN__)\
-	\/* Already executed synchronously *\/\
-	return true;\
-#elif HAVE_PTHREAD/
-    }
-    ' "$THREAD_C"
-    
-    # Patch rz_th_self: Insert Emscripten check
-    sed -i '
-    /RZ_IPI RZ_TH_TID rz_th_self/,/^}$/ {
-        s/#if HAVE_PTHREAD/#if defined(__EMSCRIPTEN__)\
-	return (RZ_TH_TID)0;\
-#elif HAVE_PTHREAD/
-    }
-    ' "$THREAD_C"
+    # Use Python for reliable multi-line text replacement
+    # Pass the file path as an argument
+    python3 -c "
+import sys
+filepath = sys.argv[1]
+with open(filepath, 'r') as f:
+    content = f.read()
+
+# Patch rz_th_new: Add Emscripten case FIRST
+old_rz_th_new = '#if HAVE_PTHREAD\n\tif (!pthread_create(&th->tid, NULL, thread_main_function, th)) {\n\t\treturn th;\n\t}'
+new_rz_th_new = '''#if defined(__EMSCRIPTEN__)
+\t/* Emscripten: Run callback synchronously */
+\tth->terminated = false;
+\tth->retv = th->function(th->user);
+\tth->terminated = true;
+\treturn th;
+#elif HAVE_PTHREAD
+\tif (!pthread_create(&th->tid, NULL, thread_main_function, th)) {
+\t\treturn th;
+\t}'''
+content = content.replace(old_rz_th_new, new_rz_th_new)
+
+# Patch rz_th_wait: Add Emscripten case FIRST
+old_rz_th_wait = '#if HAVE_PTHREAD\n\tvoid *thret = NULL;\n\treturn pthread_join(th->tid, &thret) == 0;'
+new_rz_th_wait = '''#if defined(__EMSCRIPTEN__)
+\t/* Already executed synchronously */
+\treturn true;
+#elif HAVE_PTHREAD
+\tvoid *thret = NULL;
+\treturn pthread_join(th->tid, &thret) == 0;'''
+content = content.replace(old_rz_th_wait, new_rz_th_wait)
+
+with open(filepath, 'w') as f:
+    f.write(content)
+
+print('Patched thread.c: rz_th_new and rz_th_wait')
+" "$THREAD_C"
     
     print_success "Patched thread.c for Emscripten synchronous execution"
 fi

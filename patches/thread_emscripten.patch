@@ -1,0 +1,29 @@
+--- a/librz/util/thread.c
++++ b/librz/util/thread.c
+@@ -209,7 +209,14 @@ RZ_API RZ_OWN RzThread *rz_th_new(RZ_NONNULL RzThreadFunction function, RZ_NULLA
+ 	th->function = function;
+ 	th->user = user;
+ 
+-#if HAVE_PTHREAD
++#if defined(__EMSCRIPTEN__)
++	/* Emscripten: Run callback synchronously instead of spawning thread */
++	th->terminated = false;
++	th->retv = th->function(th->user);
++	th->terminated = true;
++	return th;
++#elif HAVE_PTHREAD
+ 	if (!pthread_create(&th->tid, NULL, thread_main_function, th)) {
+ 		return th;
+ 	}
+@@ -232,7 +239,10 @@ RZ_API RZ_OWN RzThread *rz_th_new(RZ_NONNULL RzThreadFunction function, RZ_NULLA
+  */
+ RZ_API bool rz_th_wait(RZ_NONNULL RzThread *th) {
+ 	rz_return_val_if_fail(th, false);
+-#if HAVE_PTHREAD
++#if defined(__EMSCRIPTEN__)
++	/* Already executed synchronously */
++	return true;
++#elif HAVE_PTHREAD
+ 	void *thret = NULL;
+ 	return pthread_join(th->tid, &thret) == 0;
+ #elif __WINDOWS__
