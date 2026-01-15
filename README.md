@@ -1,67 +1,71 @@
 # rzwasi
 
-Rizin reverse engineering framework compiled to WebAssembly for browser-based binary analysis.
+Rizin compiled to WebAssembly. This repository contains the build scripts and patches needed to compile the Rizin reverse engineering framework for browser environments.
 
-## What This Is
+## Purpose
 
-This repository contains the build infrastructure to compile [Rizin](https://rizin.re) to WebAssembly using Emscripten. The resulting `rizin.wasm` and `rizin.js` files enable running the full Rizin CLI in web browsers.
-
-Used by [RzWeb](https://github.com/IndAlok/rzweb) to provide a complete browser-based reverse engineering environment.
+The goal is to run Rizin in a web browser. The build produces `rizin.wasm` and `rizin.js` files that can be loaded by any web application. The main consumer is [RzWeb](https://github.com/IndAlok/rzweb), which provides a complete browser-based RE interface.
 
 ## Hosted Files
 
-Pre-built WASM is hosted on GitHub Pages:
+Pre-built binaries are hosted on GitHub Pages and served via the repository's gh-pages branch:
 
 ```
-https://indalok.github.io/rzwasi/rizin.js   (~2.5MB)
-https://indalok.github.io/rzwasi/rizin.wasm (~30MB)
+https://indalok.github.io/rzwasi/rizin.js   (~2.5 MB)
+https://indalok.github.io/rzwasi/rizin.wasm (~30 MB)
 ```
 
-## Features Preserved
+These files are automatically rebuilt whenever the main branch is updated.
 
-The WASM build includes:
-- Full disassembly engine (x86, ARM, MIPS, PPC, SPARC, etc.)
-- Binary format parsers (ELF, PE, Mach-O, raw)
-- Analysis engine (function detection, xrefs, CFG)
-- Hex editor capabilities
-- String extraction
-- Import/export analysis
-- Section mapping
-- Write mode (in-memory patching)
+## What Works
 
-## Build Requirements
+The WASM build preserves most of Rizin's functionality:
 
-- Linux environment (Ubuntu 22.04+ recommended)
-- Emscripten SDK 3.1.50+
-- Python 3.8+
+- **Disassembly** for x86, ARM, MIPS, PowerPC, SPARC, and other architectures
+- **Format parsing** for ELF, PE, Mach-O, and raw binaries
+- **Analysis** including function detection, cross-references, and control flow graphs
+- **Hex editing** and raw byte manipulation
+- **String extraction** and search
+- **Write mode** for in-memory binary patching
+
+## Building
+
+You need a Linux environment with Emscripten installed. Ubuntu 22.04 or newer is recommended.
+
+### Requirements
+
+- Emscripten SDK 3.1.50 or newer
+- Python 3.8 or newer
 - Meson build system
 - Git
 
-## Building
+### Steps
 
 ```bash
 git clone https://github.com/IndAlok/rzwasi
 cd rzwasi
 
-./setup.sh
+./setup.sh install
+source ~/.emsdk/emsdk_env.sh
+
 ./build.sh
 ```
 
-Output files: `rizin/build/binrz/rizin/rizin.js` and `rizin.wasm`
+The output files will be in the `dist/` directory.
 
 ## Build Patches
 
-The build applies several patches for Emscripten compatibility:
+Compiling Rizin for Emscripten requires several patches. These are applied automatically by the build script:
 
-**Threading**: WASM is single-threaded, thread functions execute synchronously.
+**Threading** - WebAssembly is single-threaded. All thread-related functions are stubbed to execute synchronously.
 
-**libzip**: Random number generation and file operations adapted for Emscripten's virtual filesystem.
+**libzip** - The random number generation and some file operations are adapted for Emscripten's virtual filesystem.
 
-**jemalloc**: Heap analysis internals conditionally disabled (types don't exist in WASM environment).
+**jemalloc** - Heap analysis internals are conditionally disabled because the required types do not exist in the WASM environment.
 
-**Filesystem**: Uses Emscripten's in-memory FS. Files are written via `FS.writeFile()` before analysis.
+**Filesystem** - Uses Emscripten's in-memory filesystem. Binaries are written via `FS.writeFile()` before analysis.
 
-## Usage in JavaScript
+## JavaScript Usage
 
 ```javascript
 const Module = {
@@ -80,12 +84,14 @@ script.src = 'https://indalok.github.io/rzwasi/rizin.js';
 document.head.appendChild(script);
 ```
 
+Each `callMain()` invocation is stateless - Rizin starts fresh every time. Chain commands with semicolons if you need state to persist, like `s main;pdf`.
+
 ## Limitations
 
-- **No debugger**: ptrace not available in browser sandbox
-- **No networking**: Network-based protocols disabled
-- **Single-threaded**: All analysis runs synchronously
-- **CLI mode**: Each `callMain()` is stateless - combine commands with semicolons
+- **No debugger** - ptrace is not available in browser sandboxes
+- **No networking** - Network-based protocols are disabled
+- **Single-threaded** - All analysis runs synchronously on the main thread
+- **Stateless CLI** - Each command invocation starts fresh
 
 ## Version
 
