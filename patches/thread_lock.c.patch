@@ -1,0 +1,79 @@
+--- a/librz/util/thread_lock.c
++++ b/librz/util/thread_lock.c
+@@ -17,12 +17,14 @@ RZ_API RZ_OWN RzThreadLock *rz_th_lock_new(bool recursive) {
+ 	if (!thl) {
+ 		return NULL;
+ 	}
+ #if HAVE_PTHREAD
+ 	if (recursive) {
+ 		pthread_mutexattr_t attr;
+ 		pthread_mutexattr_init(&attr);
+ #if !defined(__GLIBC__) || __USE_UNIX98__
+ 		pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+ #else
+ 		pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE_NP);
+ #endif
+ 		pthread_mutex_init(&thl->lock, &attr);
+ 	} else {
+ 		pthread_mutex_init(&thl->lock, NULL);
+ 	}
+-#elif __WINDOWS__
++#elif defined(__WINDOWS__)
+ 	// Windows critical sections always accept recursive
+ 	// access and it cannot be configured in any other way.
+ 	InitializeCriticalSection(&thl->lock);
++#elif defined(__EMSCRIPTEN__)
++	/* Single-threaded: no locking needed */
+ #endif
+ 	return thl;
+ }
+@@ -45,9 +47,11 @@ RZ_API void rz_th_lock_enter(RZ_NONNULL RzThreadLock *thl) {
+ 	rz_return_if_fail(thl);
+ #if HAVE_PTHREAD
+ 	pthread_mutex_lock(&thl->lock);
+-#elif __WINDOWS__
++#elif defined(__WINDOWS__)
+ 	EnterCriticalSection(&thl->lock);
++#elif defined(__EMSCRIPTEN__)
++	/* Single-threaded: no-op */
+ #endif
+ }
+ 
+@@ -61,9 +65,12 @@ RZ_API void rz_th_lock_enter(RZ_NONNULL RzThreadLock *thl) {
+ RZ_API bool rz_th_lock_tryenter(RZ_NONNULL RzThreadLock *thl) {
+ 	rz_return_val_if_fail(thl, false);
+ #if HAVE_PTHREAD
+ 	return !pthread_mutex_trylock(&thl->lock);
+-#elif __WINDOWS__
++#elif defined(__WINDOWS__)
+ 	return TryEnterCriticalSection(&thl->lock);
++#elif defined(__EMSCRIPTEN__)
++	return true; /* Single-threaded: always succeed */
+ #endif
++	return false;
+ }
+ 
+ /**
+@@ -75,9 +82,11 @@ RZ_API void rz_th_lock_leave(RZ_NONNULL RzThreadLock *thl) {
+ 	rz_return_if_fail(thl);
+ #if HAVE_PTHREAD
+ 	pthread_mutex_unlock(&thl->lock);
+-#elif __WINDOWS__
++#elif defined(__WINDOWS__)
+ 	LeaveCriticalSection(&thl->lock);
++#elif defined(__EMSCRIPTEN__)
++	/* Single-threaded: no-op */
+ #endif
+ }
+ 
+@@ -91,7 +100,9 @@ RZ_API void rz_th_lock_free(RZ_NULLABLE RzThreadLock *thl) {
+ #if HAVE_PTHREAD
+ 	pthread_mutex_destroy(&thl->lock);
+-#elif __WINDOWS__
++#elif defined(__WINDOWS__)
+ 	DeleteCriticalSection(&thl->lock);
++#elif defined(__EMSCRIPTEN__)
++	/* Single-threaded: no-op */
+ #endif
+ 	free(thl);
+ }

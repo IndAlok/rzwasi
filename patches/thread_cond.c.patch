@@ -1,0 +1,97 @@
+--- a/librz/util/thread_cond.c
++++ b/librz/util/thread_cond.c
+@@ -13,12 +13,16 @@ RZ_API RZ_OWN RzThreadCond *rz_th_cond_new(void) {
+ 	if (!cond) {
+ 		return NULL;
+ 	}
++#if defined(__EMSCRIPTEN__)
++	/* Single-threaded: no condition var init needed */
++#else
+ #if HAVE_PTHREAD
+ 	if (pthread_cond_init(&cond->cond, NULL) != 0) {
+ 		free(cond);
+ 		return NULL;
+ 	}
+-#elif __WINDOWS__
++#elif defined(__WINDOWS__)
+ 	InitializeConditionVariable(&cond->cond);
++#endif
+ #endif
+ 	return cond;
+ }
+@@ -34,9 +38,13 @@ RZ_API RZ_OWN RzThreadCond *rz_th_cond_new(void) {
+ RZ_API void rz_th_cond_signal(RZ_NONNULL RzThreadCond *cond) {
+ 	rz_return_if_fail(cond);
++#if defined(__EMSCRIPTEN__)
++	/* Single-threaded: no-op */
++#else
+ #if HAVE_PTHREAD
+ 	pthread_cond_signal(&cond->cond);
+-#elif __WINDOWS__
++#elif defined(__WINDOWS__)
+ 	WakeConditionVariable(&cond->cond);
++#endif
+ #endif
+ }
+ 
+@@ -48,9 +56,13 @@ RZ_API void rz_th_cond_signal(RZ_NONNULL RzThreadCond *cond) {
+ RZ_API void rz_th_cond_signal_all(RZ_NONNULL RzThreadCond *cond) {
+ 	rz_return_if_fail(cond);
++#if defined(__EMSCRIPTEN__)
++	/* Single-threaded: no-op */
++#else
+ #if HAVE_PTHREAD
+ 	pthread_cond_broadcast(&cond->cond);
+-#elif __WINDOWS__
++#elif defined(__WINDOWS__)
+ 	WakeAllConditionVariable(&cond->cond);
++#endif
+ #endif
+ }
+ 
+@@ -63,9 +75,13 @@ RZ_API void rz_th_cond_signal_all(RZ_NONNULL RzThreadCond *cond) {
+ RZ_API void rz_th_cond_wait(RZ_NONNULL RzThreadCond *cond, RZ_NONNULL RzThreadLock *lock) {
+ 	rz_return_if_fail(cond);
++#if defined(__EMSCRIPTEN__)
++	/* Single-threaded: no-op, nothing to wait for */
++#else
+ #if HAVE_PTHREAD
+ 	pthread_cond_wait(&cond->cond, &lock->lock);
+-#elif __WINDOWS__
++#elif defined(__WINDOWS__)
+ 	SleepConditionVariableCS(&cond->cond, &lock->lock, INFINITE);
++#endif
+ #endif
+ }
+ 
+@@ -79,11 +95,15 @@ RZ_API void rz_th_cond_wait(RZ_NONNULL RzThreadCond *cond, RZ_NONNULL RzThreadLo
+ RZ_API void rz_th_cond_timed_wait(RZ_NONNULL RzThreadCond *cond, RZ_NONNULL RzThreadLock *lock, size_t timeout_ms) {
+ 	rz_return_if_fail(cond);
++#if defined(__EMSCRIPTEN__)
++	/* Single-threaded: no-op */
++#else
+ #if HAVE_PTHREAD
+ 	struct timespec timeout;
+ 	timeout.tv_sec = timeout_ms / 1000;
+ 	timeout.tv_nsec = (timeout_ms % 1000) * 1000000ull;
+ 	pthread_cond_timedwait(&cond->cond, &lock->lock, &timeout);
+-#elif __WINDOWS__
++#elif defined(__WINDOWS__)
+ 	SleepConditionVariableCS(&cond->cond, &lock->lock, timeout_ms);
++#endif
+ #endif
+ }
+ 
+@@ -96,7 +116,11 @@ RZ_API void rz_th_cond_free(RZ_NULLABLE RzThreadCond *cond) {
+ 	if (!cond) {
+ 		return;
+ 	}
++#if defined(__EMSCRIPTEN__)
++	/* Single-threaded: just free */
++#else
+ #if HAVE_PTHREAD
+ 	pthread_cond_destroy(&cond->cond);
++#endif
+ #endif
+ 	free(cond);
+ }

@@ -1,0 +1,50 @@
+--- a/librz/util/thread.c
++++ b/librz/util/thread.c
+@@ -27,9 +27,11 @@ static RZ_TH_RET_T thread_main_function(void *_th) {
+ RZ_IPI RZ_TH_TID rz_th_self(void) {
+ #if HAVE_PTHREAD
+ 	return pthread_self();
+-#elif __WINDOWS__
++#elif defined(__WINDOWS__)
+ 	return GetCurrentThread();
+-#else
++#elif defined(__EMSCRIPTEN__)
++	return (RZ_TH_TID)0;
++#else
+ #pragma message("Not implemented on this platform")
+ 	return (RZ_TH_TID)-1;
+ #endif
+@@ -210,10 +212,18 @@ RZ_API RZ_OWN RzThread *rz_th_new(RZ_NONNULL RzThreadFunction function, RZ_NULLA
+ #if HAVE_PTHREAD
+ 	if (!pthread_create(&th->tid, NULL, thread_main_function, th)) {
+ 		return th;
+ 	}
+-#elif __WINDOWS__
++#elif defined(__WINDOWS__)
+ 	if ((th->tid = CreateThread(NULL, 0, thread_main_function, th, 0, 0))) {
+ 		return th;
+ 	}
++#elif defined(__EMSCRIPTEN__)
++	/* Emscripten: Execute callback synchronously since no real threads exist */
++	th->terminated = false;
++	th->retv = th->function(th->user);
++	th->terminated = true;
++	return th;
+ #endif
+ 	RZ_LOG_ERROR("thread: Failed to start the RzThread\n");
+ 	free(th);
+@@ -233,9 +243,12 @@ RZ_API bool rz_th_wait(RZ_NONNULL RzThread *th) {
+ #if HAVE_PTHREAD
+ 	void *thret = NULL;
+ 	return pthread_join(th->tid, &thret) == 0;
+-#elif __WINDOWS__
++#elif defined(__WINDOWS__)
+ 	return WaitForSingleObject(th->tid, INFINITE) == 0; // WAIT_OBJECT_0
++#elif defined(__EMSCRIPTEN__)
++	/* Already executed synchronously in rz_th_new */
++	return true;
+ #endif
++	return false;
+ }
+ 
+ /**
