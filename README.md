@@ -89,7 +89,7 @@ document.head.appendChild(script);
 
 ## Version
 
-Current build: Rizin 0.9.0 (dev branch)
+Current build: Rizin 0.7.3
 
 ## Credits
 
