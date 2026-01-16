@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       rizin_version:
-        description: 'Rizin version (e.g., 0.7.3)'
+        description: 'Rizin version (e.g., 0.8.1)'
         required: false
-        default: '0.7.3'
+        default: '0.8.1'
 
 permissions:
   contents: write
@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        version: ['0.7.3']
+        version: ['0.8.1']
     
     steps:
       - uses: actions/checkout@v4
