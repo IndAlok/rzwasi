@@ -44,10 +44,8 @@ jobs:
       - name: Determine Version
         id: version
         run: |
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            echo "RIZIN_VERSION=nightly" >> $GITHUB_ENV
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "RIZIN_VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "RIZIN_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
           else
             echo "RIZIN_VERSION=${{ github.event.inputs.rizin_version || matrix.version }}" >> $GITHUB_ENV
           fi
