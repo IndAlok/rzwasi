@@ -8,12 +8,25 @@
 
 #ifdef __EMSCRIPTEN__
 
+#include <stdbool.h>
+
 typedef int RZ_TH_TID;
 typedef int RZ_TH_LOCK_T;
 typedef int RZ_TH_COND_T;
 typedef int RZ_TH_SEM_T;
 typedef void* RZ_TH_RET_T;
 #define RZ_TH_LOCAL
+
+typedef void *(*RzThreadFunction)(void *user);
+
+struct rz_th_t {
+	RZ_TH_TID tid;
+	RzThreadFunction function;
+	void *user;
+	void *retv;
+	bool breaked;
+	bool terminated;
+};
 
 #endif
 

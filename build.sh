@@ -167,6 +167,7 @@ STUBS_H="${SCRIPT_DIR}/patches/rz_emscripten_thread_stubs.h"
 if [ -f "$THREAD_H" ] && [ -f "$STUBS_H" ]; then
     cp "$STUBS_H" "${RIZIN_DIR}/librz/include/rz_emscripten_thread_stubs.h"
     
+    # Patch 1: Replace #error with Emscripten include
     awk '
     /#error Threading library only supported for pthread and w32/ {
         print "#ifdef __EMSCRIPTEN__"
@@ -179,6 +180,10 @@ if [ -f "$THREAD_H" ] && [ -f "$STUBS_H" ]; then
     { print }
     ' "$THREAD_H" > "${THREAD_H}.patched"
     mv "${THREAD_H}.patched" "$THREAD_H"
+    
+    # Patch 2: Wrap struct rz_th_t so Emscripten uses stubs struct with terminated field
+    sed -i 's/^struct rz_th_t {/#ifndef __EMSCRIPTEN__\nstruct rz_th_t {/' "$THREAD_H"
+    sed -i '/struct rz_th_t {/,/^};/{s/^};$/};\n#endif/}' "$THREAD_H"
     
     print_success "Patched thread.h"
 else
