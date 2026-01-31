@@ -166,7 +166,6 @@ CONS_PATCH="${SCRIPT_DIR}/patches/cons_emscripten.patch"
 if [ -f "$CONS_C" ] && [ -f "$CONS_PATCH" ]; then
     cd "${RIZIN_DIR}"
     patch -p1 --forward < "$CONS_PATCH" || true
-    cd "${SCRIPT_DIR}"
     print_success "Patched cons.c"
 else
     print_error "cons.c or cons_emscripten.patch not found"

@@ -10,7 +10,7 @@
  // SPDX-License-Identifier: LGPL-3.0-only
 @@ -155,6 +159,19 @@ static void __break_signal(int sig) {
  }
-
+ 
  static inline void __cons_write_ll(const char *buf, int len) {
 +#ifdef __EMSCRIPTEN__
 +	// Emscripten: Use EM_ASM to call JavaScript print function directly.
