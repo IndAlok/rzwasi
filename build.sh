@@ -160,6 +160,18 @@ if [ -f "$SYS_C" ]; then
     print_success "Patched sys.c"
 fi
 
+print_status "Patching cons.c for Emscripten output..."
+CONS_C="${RIZIN_DIR}/librz/cons/cons.c"
+CONS_PATCH="${SCRIPT_DIR}/patches/cons_emscripten.patch"
+if [ -f "$CONS_C" ] && [ -f "$CONS_PATCH" ]; then
+    cd "${RIZIN_DIR}"
+    patch -p1 --forward < "$CONS_PATCH" || true
+    cd "${SCRIPT_DIR}"
+    print_success "Patched cons.c"
+else
+    print_error "cons.c or cons_emscripten.patch not found"
+fi
+
 print_status "Patching thread.h..."
 THREAD_H="${RIZIN_DIR}/librz/util/thread.h"
 STUBS_H="${SCRIPT_DIR}/patches/rz_emscripten_thread_stubs.h"

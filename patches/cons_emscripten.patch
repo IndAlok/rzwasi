@@ -1,0 +1,31 @@
+--- a/librz/cons/cons.c
++++ b/librz/cons/cons.c
+@@ -1,3 +1,7 @@
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++#endif
++
+ // SPDX-FileCopyrightText: 2008-2020 pancake <pancake@nopcode.org>
+ // SPDX-FileCopyrightText: 2008-2020 Jody Frankowski <jody.frankowski@gmail.com>
+ // SPDX-License-Identifier: LGPL-3.0-only
+@@ -155,6 +159,19 @@ static void __break_signal(int sig) {
+ }
+
+ static inline void __cons_write_ll(const char *buf, int len) {
++#ifdef __EMSCRIPTEN__
++	// Emscripten: Use EM_ASM to call JavaScript print function directly.
++	// This bypasses the broken write() syscall and uses Module.print.
++	if (len > 0) {
++		char *tmp = malloc(len + 1);
++		if (tmp) {
++			memcpy(tmp, buf, len);
++			tmp[len] = '\0';
++			EM_ASM({ if (Module.print) Module.print(UTF8ToString($0)); }, tmp);
++			free(tmp);
++		}
++	}
++	return;
++#endif
+ #if __WINDOWS__
+ 	if (I.vtmode != RZ_VIRT_TERM_MODE_DISABLE) {
+ 		rz_xwrite(I.fdout, buf, len);
