@@ -160,6 +160,38 @@ if [ -f "$SYS_C" ]; then
     print_success "Patched sys.c"
 fi
 
+print_status "Patching cons.c for Emscripten output..."
+CONS_C="${RIZIN_DIR}/librz/cons/cons.c"
+if [ -f "$CONS_C" ]; then
+    # Add emscripten.h include at the top
+    if ! grep -q "include <emscripten.h>" "$CONS_C"; then
+        sed -i '1s/^/#ifdef __EMSCRIPTEN__\n#include <emscripten.h>\n#endif\n/' "$CONS_C"
+    fi
+    
+    # Replace __cons_write_ll to use EM_ASM for WASM output
+    # Find the function and add Emscripten-specific code at the start
+    sed -i '/^static inline void __cons_write_ll(const char \*buf, int len) {$/,/^#if __WINDOWS__/ {
+        /^static inline void __cons_write_ll(const char \*buf, int len) {$/ {
+            a\
+#ifdef __EMSCRIPTEN__\
+	if (len > 0) {\
+		char *tmp = malloc(len + 1);\
+		if (tmp) {\
+			memcpy(tmp, buf, len);\
+			tmp[len] = '"'"'\\0'"'"';\
+			EM_ASM({ if (Module.print) Module.print(UTF8ToString($0)); }, tmp);\
+			free(tmp);\
+		}\
+	}\
+	return;\
+#endif
+        }
+    }' "$CONS_C"
+    print_success "Patched cons.c"
+else
+    print_error "cons.c not found"
+fi
+
 print_status "Patching thread.h..."
 THREAD_H="${RIZIN_DIR}/librz/util/thread.h"
 STUBS_H="${SCRIPT_DIR}/patches/rz_emscripten_thread_stubs.h"
