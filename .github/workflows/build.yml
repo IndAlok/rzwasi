@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       rizin_version:
-        description: 'Rizin version (e.g., 0.8.1)'
+        description: 'Rizin version (leave empty to use VERSION file)'
         required: false
-        default: '0.8.1'
+        default: ''
 
 permissions:
   contents: write
@@ -19,12 +19,13 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        version: ['0.8.1']
     
     steps:
       - uses: actions/checkout@v4
+
+      - name: Read VERSION file
+        id: read-version
+        run: echo "FILE_VERSION=$(cat VERSION | tr -d '\r\n')" >> $GITHUB_OUTPUT
 
       - name: Install dependencies
         run: |
@@ -46,8 +47,10 @@ jobs:
         run: |
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "RIZIN_VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+          elif [[ -n "${{ github.event.inputs.rizin_version }}" ]]; then
+            echo "RIZIN_VERSION=${{ github.event.inputs.rizin_version }}" >> $GITHUB_ENV
           else
-            echo "RIZIN_VERSION=${{ github.event.inputs.rizin_version || matrix.version }}" >> $GITHUB_ENV
+            echo "RIZIN_VERSION=${{ steps.read-version.outputs.FILE_VERSION }}" >> $GITHUB_ENV
           fi
 
       - name: Build Rizin WASM

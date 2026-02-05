@@ -95,7 +95,7 @@ Each `callMain()` invocation is stateless - Rizin starts fresh every time. Chain
 
 ## Version
 
-Current build: Rizin 0.8.1
+Current build version is defined in the `VERSION` file and deployed automatically.
 
 ## Credits
 
