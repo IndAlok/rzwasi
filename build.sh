@@ -12,7 +12,7 @@ BUILD_JOBS="${BUILD_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null |
 
 print_status() { echo -e "\033[1;34m==>\033[0m $1"; }
 print_error() { echo -e "\033[1;31mError:\033[0m $1" >&2; }
-print_success() { echo -e "\033[1;32m✓\033[0m $1"; }
+print_success() { echo -e "\033[1;32mâœ“\033[0m $1"; }
 
 CLEAN=false
 
@@ -30,9 +30,9 @@ done
 RIZIN_DIR="${SCRIPT_DIR}/.rizin-src"
 BUILD_DIR="${RIZIN_DIR}/build-wasm"
 
-echo "╔══════════════════════════════════════════════════════════╗"
-echo "║           rzwasi - Build Rizin for WebAssembly           ║"
-echo "╚══════════════════════════════════════════════════════════╝"
+echo "â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—"
+echo "â•‘           rzwasi - Build Rizin for WebAssembly           â•‘"
+echo "â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•"
 echo "Version: ${RIZIN_VERSION} | Jobs: ${BUILD_JOBS}"
 echo ""
 
@@ -154,7 +154,7 @@ print_status "Patching Rizin source..."
 SESSION_API_SRC="${SCRIPT_DIR}/patches/rzweb_session_api.c"
 SESSION_API_DEST="${RIZIN_DIR}/binrz/rizin/rzweb_session_api.c"
 RIZIN_MESON="${RIZIN_DIR}/binrz/rizin/meson.build"
-RZWEB_EXPORTED_FUNCTIONS="_main,_malloc,_free,_rzweb_create_session,_rzweb_close_session,_rzweb_open_file,_rzweb_cmd,_rzweb_get_seek,_rzweb_save_project,_rzweb_load_project,_rzweb_get_last_error"
+RZWEB_EXPORTED_FUNCTIONS="_main,_malloc,_free,_rzweb_create_session,_rzweb_close_session,_rzweb_open_file,_rzweb_cmd,_rzweb_get_seek,_rzweb_save_project,_rzweb_load_project,_rzweb_get_last_error,_rzweb_autocomplete,_rzweb_get_command_catalog"
 
 if [ -f "$SESSION_API_SRC" ]; then
     cp "$SESSION_API_SRC" "$SESSION_API_DEST"

@@ -1,42 +1,55 @@
 # rzwasi
 
-Rizin compiled to WebAssembly. This repository contains the build scripts and patches needed to compile the Rizin reverse engineering framework for browser environments.
+`rzwasi` builds [Rizin](https://rizin.re) for browser environments with Emscripten. The generated `rizin.js` and `rizin.wasm` artifacts are consumed by [RzWeb](https://github.com/IndAlok/rzweb) and any other frontend that wants a browser-native reverse engineering core.
 
 ## Purpose
 
-The goal is to run Rizin in a web browser. The build produces `rizin.wasm` and `rizin.js` files that can be loaded by any web application. The main consumer is [RzWeb](https://github.com/IndAlok/rzweb), which provides a complete browser-based RE interface.
+This repository is the WebAssembly build layer for Rizin. It keeps the browser build reproducible, applies the portability patches needed for Emscripten, and exports the additional `rzweb_*` ABI used by RzWeb for persistent sessions, project snapshots, command autocomplete, and command catalog lookups.
 
 ## Hosted Files
 
-Pre-built binaries are hosted on GitHub Pages and served via the repository's gh-pages branch:
+Prebuilt artifacts are published from GitHub Pages:
 
+```text
+https://indalok.github.io/rzwasi/rizin.js
+https://indalok.github.io/rzwasi/rizin.wasm
 ```
-https://indalok.github.io/rzwasi/rizin.js   (~2.5 MB)
-https://indalok.github.io/rzwasi/rizin.wasm (~30 MB)
-```
 
-These files are automatically rebuilt whenever the main branch is updated.
+## What The Build Supports
 
-## What Works
+- Disassembly across the architectures and formats supported by the bundled Rizin release
+- Parsing for ELF, PE, Mach-O, and raw binaries
+- Analysis data such as functions, strings, imports, exports, sections, and graphs
+- Write-enabled in-memory sessions when the caller opts into write mode
+- Persistent `RzCore` sessions for browser apps that use the `rzweb_*` API instead of only `callMain()`
 
-The WASM build preserves most of Rizin's functionality:
+## RzWeb In Action
 
-- **Disassembly** for x86, ARM, MIPS, PowerPC, SPARC, and other architectures
-- **Format parsing** for ELF, PE, Mach-O, and raw binaries
-- **Analysis** including function detection, cross-references, and control flow graphs
-- **Hex editing** and raw byte manipulation
-- **String extraction** and search
-- **Write mode** for in-memory binary patching
+**Terminal**
+
+![RzWeb Terminal](https://raw.githubusercontent.com/IndAlok/rzweb/main/public/Terminal.png)
+
+**Control Flow Graph**
+
+![RzWeb Graph](https://raw.githubusercontent.com/IndAlok/rzweb/main/public/Graph.png)
+
+**Imports**
+
+![RzWeb Imports](https://raw.githubusercontent.com/IndAlok/rzweb/main/public/Imports.png)
+
+**Binary Info**
+
+![RzWeb Binary Info](https://raw.githubusercontent.com/IndAlok/rzweb/main/public/BinInfo.png)
 
 ## Building
 
-You need a Linux environment with Emscripten installed. Ubuntu 22.04 or newer is recommended.
+Use a Linux environment with Emscripten installed. Ubuntu 22.04 or newer is a good baseline.
 
 ### Requirements
 
 - Emscripten SDK 3.1.50 or newer
 - Python 3.8 or newer
-- Meson build system
+- Meson
 - Git
 
 ### Steps
@@ -51,51 +64,61 @@ source ~/.emsdk/emsdk_env.sh
 ./build.sh
 ```
 
-The output files will be in the `dist/` directory.
+The compiled artifacts are written to `dist/`.
+
+## Exported Browser APIs
+
+### Traditional CLI entrypoint
+
+The standard Emscripten entrypoint still works:
+
+```javascript
+Module.FS.writeFile('/work/binary', binaryData);
+Module.callMain(['-q', '-c', 'afl', '/work/binary']);
+```
+
+`callMain()` remains stateless, which is useful for one-shot invocations and compatibility.
+
+### Persistent session API used by RzWeb
+
+`rzwasi` also exports browser-facing helpers for a persistent `RzCore` session:
+
+- `rzweb_create_session`
+- `rzweb_close_session`
+- `rzweb_open_file`
+- `rzweb_cmd`
+- `rzweb_get_seek`
+- `rzweb_save_project`
+- `rzweb_load_project`
+- `rzweb_get_last_error`
+- `rzweb_autocomplete`
+- `rzweb_get_command_catalog`
+
+Minimal example:
+
+```javascript
+const createSession = Module.cwrap('rzweb_create_session', 'number', []);
+const openFile = Module.cwrap('rzweb_open_file', 'number', ['number', 'string', 'number', 'number']);
+const cmd = Module.cwrap('rzweb_cmd', 'string', ['number', 'string']);
+
+Module.FS.writeFile('/work/sample.bin', binaryData);
+
+const session = createSession();
+openFile(session, '/work/sample.bin', 0, 1);
+cmd(session, 'aaa');
+console.log(cmd(session, 'aflj'));
+```
 
 ## Build Patches
 
-Compiling Rizin for Emscripten requires several patches. These are applied automatically by the build script:
-
-**Threading** - WebAssembly is single-threaded. All thread-related functions are stubbed to execute synchronously.
-
-**libzip** - The random number generation and some file operations are adapted for Emscripten's virtual filesystem.
-
-**jemalloc** - Heap analysis internals are conditionally disabled because the required types do not exist in the WASM environment.
-
-**Filesystem** - Uses Emscripten's in-memory filesystem. Binaries are written via `FS.writeFile()` before analysis.
-
-## JavaScript Usage
-
-```javascript
-const Module = {
-  locateFile: (path) => `https://indalok.github.io/rzwasi/${path}`,
-  print: (text) => console.log(text),
-  printErr: (text) => console.error(text),
-  noInitialRun: true,
-  onRuntimeInitialized: () => {
-    Module.FS.writeFile('/work/binary', binaryData);
-    Module.callMain(['-q', '-c', 'afl', '/work/binary']);
-  }
-};
-
-const script = document.createElement('script');
-script.src = 'https://indalok.github.io/rzwasi/rizin.js';
-document.head.appendChild(script);
-```
-
-Each `callMain()` invocation is stateless - Rizin starts fresh every time. Chain commands with semicolons if you need state to persist, like `s main;pdf`.
+The build script applies the compatibility fixes needed for Emscripten automatically. That includes the browser-thread stubs, the `libzip` portability fix, the `io_shm` portability patch, and the target-local Meson changes that attach the `rzweb_*` session wrapper only to the `rizin` binary where it belongs.
 
 ## Limitations
 
-- **No debugger** - ptrace is not available in browser sandboxes
-- **No networking** - Network-based protocols are disabled
-- **Single-threaded** - All analysis runs synchronously on the main thread
-- **Stateless CLI** - Each command invocation starts fresh
-
-## Version
-
-Current build version is defined in the `VERSION` file and deployed automatically.
+- No debugger support in browser sandboxes
+- No traditional networking workflows inside the browser runtime
+- Single-threaded analysis and UI responsiveness still depend on browser and device limits
+- Apps that rely only on `callMain()` remain stateless by design until they adopt the persistent session ABI
 
 ## Credits
 

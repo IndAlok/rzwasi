@@ -1,3 +1,5 @@
+#include <rz_cmd.h>
+#include <rz_cons.h>
 #include <rz_core.h>
 #include <rz_project.h>
 #include <rz_types.h>
@@ -19,6 +21,8 @@ typedef struct rzweb_session_t {
 	RzCore *core;
 	char *last_output;
 	char *last_error;
+	char *last_completion;
+	char *last_command_catalog;
 	bool in_use;
 } RzwebSession;
 
@@ -80,6 +84,54 @@ static bool rzweb_reset_core(RzwebSession *session) {
 	return true;
 }
 
+static const char *rzweb_empty_completion_json(RzwebSession *session) {
+	const char *payload = "{\"start\":0,\"end\":0,\"endString\":\"\",\"options\":[]}";
+	if (!session) {
+		return payload;
+	}
+	rzweb_set_string(&session->last_completion, payload);
+	return session->last_completion ? session->last_completion : payload;
+}
+
+static void rzweb_fill_line_buffer(RzLineBuffer *buf, const char *input, int cursor_pos) {
+	memset(buf, 0, sizeof(*buf));
+	if (!input) {
+		return;
+	}
+
+	size_t input_len = strlen(input);
+	if (input_len >= RZ_LINE_BUFSIZE) {
+		input_len = RZ_LINE_BUFSIZE - 1;
+	}
+
+	memcpy(buf->data, input, input_len);
+	buf->data[input_len] = '\0';
+	buf->length = (int)input_len;
+
+	if (cursor_pos < 0) {
+		cursor_pos = 0;
+	} else if (cursor_pos > buf->length) {
+		cursor_pos = buf->length;
+	}
+	buf->index = cursor_pos;
+}
+
+static bool rzweb_add_command_catalog_entry(RzCmd *cmd, const RzCmdDesc *desc, void *user) {
+	PJ *j = (PJ *)user;
+	if (!cmd || !desc || !desc->name || !*desc->name || !j) {
+		return true;
+	}
+
+	const RzCmdDescHelp *help = desc->help;
+	pj_ko(j, desc->name);
+	pj_ks(j, "name", desc->name);
+	pj_ks(j, "summary", help ? rz_str_get(help->summary) : "");
+	pj_ks(j, "description", help ? rz_str_get(help->description) : "");
+	pj_ks(j, "args", help ? rz_str_get(help->args_str) : "");
+	pj_end(j);
+	return true;
+}
+
 EMSCRIPTEN_KEEPALIVE int rzweb_create_session(void) {
 	for (int i = 0; i < RZWEB_MAX_SESSIONS; i++) {
 		RzwebSession *session = &rzweb_sessions[i];
@@ -91,10 +143,14 @@ EMSCRIPTEN_KEEPALIVE int rzweb_create_session(void) {
 		session->in_use = true;
 		rzweb_set_string(&session->last_output, "");
 		rzweb_set_string(&session->last_error, "");
+		rzweb_set_string(&session->last_completion, "");
+		rzweb_set_string(&session->last_command_catalog, "");
 
 		if (!rzweb_reset_core(session)) {
 			free(session->last_output);
 			free(session->last_error);
+			free(session->last_completion);
+			free(session->last_command_catalog);
 			memset(session, 0, sizeof(*session));
 			return 0;
 		}
@@ -116,6 +172,8 @@ EMSCRIPTEN_KEEPALIVE int rzweb_close_session(int session_id) {
 	}
 	free(session->last_output);
 	free(session->last_error);
+	free(session->last_completion);
+	free(session->last_command_catalog);
 	memset(session, 0, sizeof(*session));
 	return 1;
 }
@@ -161,6 +219,91 @@ EMSCRIPTEN_KEEPALIVE const char *rzweb_cmd(int session_id, const char *command) 
 
 EMSCRIPTEN_KEEPALIVE const char *rzweb_get_seek(int session_id) {
 	return rzweb_cmd(session_id, "s");
+}
+
+EMSCRIPTEN_KEEPALIVE const char *rzweb_autocomplete(int session_id, const char *input, int cursor_pos, int max_results) {
+	RzwebSession *session = rzweb_get_session(session_id);
+	if (!session || !session->core) {
+		return "{\"start\":0,\"end\":0,\"endString\":\"\",\"options\":[]}";
+	}
+	if (!input || cursor_pos <= 0) {
+		return rzweb_empty_completion_json(session);
+	}
+
+	if (max_results <= 0) {
+		max_results = 12;
+	}
+
+	RzLineBuffer buf;
+	rzweb_fill_line_buffer(&buf, input, cursor_pos);
+
+	RzLineNSCompletionResult *res = rz_core_autocomplete_rzshell(session->core, &buf, RZ_LINE_PROMPT_DEFAULT);
+	PJ *j = pj_new();
+	if (!j) {
+		if (res) {
+			rz_line_ns_completion_result_free(res);
+		}
+		return rzweb_empty_completion_json(session);
+	}
+
+	pj_o(j);
+	pj_ki(j, "start", res ? (int)res->start : 0);
+	pj_ki(j, "end", res ? (int)res->end : 0);
+	pj_ks(j, "endString", res && res->end_string ? res->end_string : "");
+	pj_ka(j, "options");
+	if (res) {
+		size_t count = rz_pvector_len(&res->options);
+		if (count > (size_t)max_results) {
+			count = (size_t)max_results;
+		}
+		for (size_t i = 0; i < count; i++) {
+			const char *option = (const char *)rz_pvector_at(&res->options, i);
+			if (option && *option) {
+				pj_s(j, option);
+			}
+		}
+	}
+	pj_end(j);
+	pj_end(j);
+
+	char *json = pj_drain(j);
+	if (res) {
+		rz_line_ns_completion_result_free(res);
+	}
+	if (!json) {
+		return rzweb_empty_completion_json(session);
+	}
+
+	rzweb_set_string(&session->last_completion, json);
+	free(json);
+	return session->last_completion ? session->last_completion : "";
+}
+
+EMSCRIPTEN_KEEPALIVE const char *rzweb_get_command_catalog(int session_id) {
+	RzwebSession *session = rzweb_get_session(session_id);
+	if (!session || !session->core || !session->core->rcmd) {
+		return "{}";
+	}
+
+	PJ *j = pj_new();
+	if (!j) {
+		rzweb_set_string(&session->last_command_catalog, "{}");
+		return session->last_command_catalog ? session->last_command_catalog : "{}";
+	}
+
+	pj_o(j);
+	rz_cmd_foreach_cmdname(session->core->rcmd, NULL, rzweb_add_command_catalog_entry, j);
+	pj_end(j);
+
+	char *json = pj_drain(j);
+	if (!json) {
+		rzweb_set_string(&session->last_command_catalog, "{}");
+		return session->last_command_catalog ? session->last_command_catalog : "{}";
+	}
+
+	rzweb_set_string(&session->last_command_catalog, json);
+	free(json);
+	return session->last_command_catalog ? session->last_command_catalog : "";
 }
 
 EMSCRIPTEN_KEEPALIVE int rzweb_save_project(int session_id, const char *project_path, int compress) {
