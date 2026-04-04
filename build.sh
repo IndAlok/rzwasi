@@ -182,6 +182,31 @@ if [ -f "$SYS_C" ]; then
     print_success "Patched sys.c"
 fi
 
+print_status "Patching io_shm.c..."
+IO_SHM_C="${RIZIN_DIR}/librz/io/p/io_shm.c"
+if [ -f "$IO_SHM_C" ]; then
+    python3 - "$IO_SHM_C" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+original = text
+
+text = text.replace(
+    "#if HAVE_HEADER_LINUX_ASHMEM_H || HAVE_HEADER_SYS_SHM_H || __WINDOWS__",
+    "#if (HAVE_HEADER_LINUX_ASHMEM_H || HAVE_HEADER_SYS_SHM_H || __WINDOWS__) && !defined(__EMSCRIPTEN__)",
+    1,
+)
+text = text.replace("shm->id = atoi(ptr);", "shm->id = atoi(name);")
+text = text.replace("rz_str_djb2_hash(ptr);", "rz_str_djb2_hash(name);")
+
+if text != original:
+    path.write_text(text)
+PY
+    print_success "Patched io_shm.c"
+fi
+
 print_status "Patching cons.c for Emscripten output..."
 CONS_C="${RIZIN_DIR}/librz/cons/cons.c"
 if [ -f "$CONS_C" ]; then
