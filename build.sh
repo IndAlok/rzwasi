@@ -121,6 +121,12 @@ RANDPATCH
         print_success "Patched zip_source_file_stdio_named.c"
     fi
 
+    COMPAT_H="${LIBZIP_DIR}/lib/compat.h"
+    if [ -f "$COMPAT_H" ]; then
+        sed -i 's/^#ifndef HAVE_FTELLO$/#if !defined(HAVE_FTELLO) \&\& !defined(__EMSCRIPTEN__)/' "$COMPAT_H"
+        print_success "Patched compat.h"
+    fi
+
     ZIPINT_H="${LIBZIP_DIR}/lib/zipint.h"
     if [ -f "$ZIPINT_H" ]; then
         cat >> "$ZIPINT_H" << 'EOF'
