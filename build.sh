@@ -70,7 +70,7 @@ ranlib = 'emranlib'
 
 [built-in options]
 c_args = ['-O2', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-D__EMSCRIPTEN__=1']
-c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=33554432', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0', '-sMODULARIZE=0', '-sEXPORT_ES6=0', '-sEXPORTED_RUNTIME_METHODS=FS,callMain,ccall,cwrap,print,printErr,setValue,getValue', '-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_rzweb_create_session,_rzweb_close_session,_rzweb_open_file,_rzweb_cmd,_rzweb_get_seek,_rzweb_save_project,_rzweb_load_project,_rzweb_get_last_error', '-sINVOKE_RUN=0', '-sFORCE_FILESYSTEM=1', '-sEXIT_RUNTIME=0', '-sASSERTIONS=0']
+c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=33554432', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0', '-sMODULARIZE=0', '-sEXPORT_ES6=0', '-sEXPORTED_RUNTIME_METHODS=FS,callMain,ccall,cwrap,print,printErr,setValue,getValue', '-sEXPORTED_FUNCTIONS=_main,_malloc,_free', '-sINVOKE_RUN=0', '-sFORCE_FILESYSTEM=1', '-sEXIT_RUNTIME=0', '-sASSERTIONS=0']
 
 [host_machine]
 system = 'emscripten'
@@ -154,13 +154,54 @@ print_status "Patching Rizin source..."
 SESSION_API_SRC="${SCRIPT_DIR}/patches/rzweb_session_api.c"
 SESSION_API_DEST="${RIZIN_DIR}/binrz/rizin/rzweb_session_api.c"
 RIZIN_MESON="${RIZIN_DIR}/binrz/rizin/meson.build"
+RZWEB_EXPORTED_FUNCTIONS="_main,_malloc,_free,_rzweb_create_session,_rzweb_close_session,_rzweb_open_file,_rzweb_cmd,_rzweb_get_seek,_rzweb_save_project,_rzweb_load_project,_rzweb_get_last_error"
 
 if [ -f "$SESSION_API_SRC" ]; then
     cp "$SESSION_API_SRC" "$SESSION_API_DEST"
-    if ! grep -q "rzweb_session_api.c" "$RIZIN_MESON"; then
-        sed -i "s/executable('rizin', 'rizin.c',/executable('rizin', ['rizin.c', 'rzweb_session_api.c'],/g" "$RIZIN_MESON"
-    fi
-    print_success "Added rzweb persistent session wrapper"
+    python3 - "$RIZIN_MESON" "$RZWEB_EXPORTED_FUNCTIONS" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+exports = sys.argv[2]
+text = path.read_text()
+original = text
+
+single_source = "rizin_exe = executable('rizin', 'rizin.c',"
+wrapped_sources = "rizin_exe = executable('rizin', ['rizin.c', 'rzweb_session_api.c'],"
+
+if single_source in text:
+    text = text.replace(single_source, wrapped_sources, 1)
+elif wrapped_sources not in text:
+    raise SystemExit("Could not find rizin executable definition to patch")
+
+target_start = text.find("rizin_exe = executable('rizin'")
+if target_start == -1:
+    raise SystemExit("Could not locate rizin executable block")
+
+target_end = text.find("\n)\n", target_start)
+if target_end == -1:
+    raise SystemExit("Could not find end of rizin executable block")
+
+block = text[target_start:target_end + 3]
+link_args_line = f"  link_args: ['-sEXPORTED_FUNCTIONS={exports}'],\n"
+
+if "link_args:" in block:
+    block = re.sub(r"  link_args: \[[^\n]*\],\n", link_args_line, block, count=1)
+else:
+    marker = "  install: true,\n"
+    if marker not in block:
+        raise SystemExit("Could not find install marker in rizin executable block")
+    block = block.replace(marker, link_args_line + marker, 1)
+
+if block != text[target_start:target_end + 3]:
+    text = text[:target_start] + block + text[target_end + 3:]
+
+if text != original:
+    path.write_text(text)
+PY
+    print_success "Patched rizin target for rzweb persistent session exports"
 else
     print_error "Could not find rzweb_session_api.c"
     exit 1
