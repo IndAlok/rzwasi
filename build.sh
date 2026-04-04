@@ -70,7 +70,7 @@ ranlib = 'emranlib'
 
 [built-in options]
 c_args = ['-O2', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-D__EMSCRIPTEN__=1']
-c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=33554432', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0', '-sMODULARIZE=0', '-sEXPORT_ES6=0', '-sEXPORTED_RUNTIME_METHODS=FS,callMain,ccall,cwrap,print,printErr,setValue,getValue', '-sINVOKE_RUN=0', '-sFORCE_FILESYSTEM=1', '-sEXIT_RUNTIME=0', '-sASSERTIONS=0']
+c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=33554432', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0', '-sMODULARIZE=0', '-sEXPORT_ES6=0', '-sEXPORTED_RUNTIME_METHODS=FS,callMain,ccall,cwrap,print,printErr,setValue,getValue', '-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_rzweb_create_session,_rzweb_close_session,_rzweb_open_file,_rzweb_cmd,_rzweb_get_seek,_rzweb_save_project,_rzweb_load_project,_rzweb_get_last_error', '-sINVOKE_RUN=0', '-sFORCE_FILESYSTEM=1', '-sEXIT_RUNTIME=0', '-sASSERTIONS=0']
 
 [host_machine]
 system = 'emscripten'
@@ -145,6 +145,21 @@ else
 fi
 
 print_status "Patching Rizin source..."
+SESSION_API_SRC="${SCRIPT_DIR}/patches/rzweb_session_api.c"
+SESSION_API_DEST="${RIZIN_DIR}/binrz/rizin/rzweb_session_api.c"
+RIZIN_MESON="${RIZIN_DIR}/binrz/rizin/meson.build"
+
+if [ -f "$SESSION_API_SRC" ]; then
+    cp "$SESSION_API_SRC" "$SESSION_API_DEST"
+    if ! grep -q "rzweb_session_api.c" "$RIZIN_MESON"; then
+        sed -i "s/executable('rizin', 'rizin.c',/executable('rizin', ['rizin.c', 'rzweb_session_api.c'],/g" "$RIZIN_MESON"
+    fi
+    print_success "Added rzweb persistent session wrapper"
+else
+    print_error "Could not find rzweb_session_api.c"
+    exit 1
+fi
+
 HEAP_JEM_H="${RIZIN_DIR}/librz/include/rz_heap_jemalloc.h"
 if [ -f "$HEAP_JEM_H" ]; then
     sed -i 's|#include <rz_jemalloc/internal/jemalloc_internal.h>|#ifndef __EMSCRIPTEN__\n#include <rz_jemalloc/internal/jemalloc_internal.h>\n#endif|g' "$HEAP_JEM_H"
