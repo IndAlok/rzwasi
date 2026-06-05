@@ -66,6 +66,28 @@ source ~/.emsdk/emsdk_env.sh
 
 The compiled artifacts are written to `dist/`.
 
+### Optional: jsdec decompiler (experimental)
+
+The stock build ships Rizin's default plugins, which do not include a decompiler.
+An opt-in flag statically links the [jsdec](https://github.com/rizinorg/jsdec)
+plugin so the `pdd` command becomes available in the browser:
+
+```bash
+ENABLE_JSDEC=1 ./build.sh      # or: ./build.sh --jsdec
+```
+
+When enabled, the build natively compiles jsdec's `qjsc`/`modjs_gen` codegen
+tools (so they run on the host instead of being cross-compiled to WASM),
+generates the plugin bytecode, compiles jsdec plus its bundled quickjs-ng to
+WASM objects, archives them, and links the archive into the `rizin` binary.
+`rzweb_session_api.c` then registers the plugin on every session via
+`rz_core_plugin_add`.
+
+This path is **experimental ofcourse** (the non-deploying
+`build-jsdec` job). It is gated entirely behind the flag: with the flag unset,
+the produced artifacts are byte-for-byte identical to the stock build, and the
+GitHub Pages deploy always uses the stock build.
+
 ## Exported Browser APIs
 
 ### Traditional CLI entrypoint
@@ -119,6 +141,7 @@ The build script applies the compatibility fixes needed for Emscripten automatic
 - No traditional networking workflows inside the browser runtime
 - Single-threaded analysis and UI responsiveness still depend on browser and device limits
 - Apps that rely only on `callMain()` remain stateless by design until they adopt the persistent session ABI
+- No decompiler in the stock build; the `pdd` decompiler is available only via the experimental `ENABLE_JSDEC=1` flag
 
 ## Credits
 

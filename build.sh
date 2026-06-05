@@ -10,9 +10,116 @@ RIZIN_VERSION="${RIZIN_VERSION:-$DEFAULT_VERSION}"
 OUTPUT_DIR="${OUTPUT_DIR:-${SCRIPT_DIR}/dist}"
 BUILD_JOBS="${BUILD_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
+# Optional jsdec decompiler (rizinorg/jsdec -> the `pdd` command). OFF by default.
+ENABLE_JSDEC="${ENABLE_JSDEC:-0}"
+JSDEC_VERSION="${JSDEC_VERSION:-0.8.0}"
+
 print_status() { echo -e "\033[1;34m==>\033[0m $1"; }
 print_error() { echo -e "\033[1;31mError:\033[0m $1" >&2; }
 print_success() { echo -e "\033[1;32mâœ“\033[0m $1"; }
+
+# build_jsdec_wasm: compile the jsdec decompiler into ${JSDEC_STATIC_LIB}.
+build_jsdec_wasm() {
+    print_status "Building jsdec decompiler (experimental)..."
+
+    if [ ! -d "${JSDEC_DIR}/.git" ]; then
+        print_status "Cloning jsdec v${JSDEC_VERSION}..."
+        git clone --depth 1 --branch "v${JSDEC_VERSION}" \
+            https://github.com/rizinorg/jsdec.git "${JSDEC_DIR}"
+    fi
+
+    local gen_dir="${JSDEC_DIR}/.gen"
+    local native_build="${JSDEC_DIR}/.build-native"
+    local wasm_obj="${JSDEC_DIR}/.obj-wasm"
+    local qjs_dir="${JSDEC_DIR}/subprojects/libquickjs"
+
+    (
+        cd "${JSDEC_DIR}"
+
+        print_status "jsdec: downloading subprojects (quickjs-ng)..."
+        meson subprojects download
+
+        # Native codegen tools only. build_type=standalone avoids any rizin dep.
+        print_status "jsdec: building native qjsc + modjs_gen..."
+        rm -rf "${native_build}"
+        CC=cc CC_FOR_BUILD=cc meson setup "${native_build}" -Dbuild_type=standalone >/dev/null
+        ninja -C "${native_build}" qjsc modjs_gen
+
+        print_status "jsdec: generating bytecode headers..."
+        mkdir -p "${gen_dir}/js"
+        "${native_build}/qjsc" -m -N main_bytecode -o "${gen_dir}/js/bytecode.h" "js/jsdec-plugin.js"
+        "${native_build}/modjs_gen" "${gen_dir}/js/bytecode.h" "${gen_dir}/js/bytecode_mod.h"
+    )
+
+    # Reuse rizin's exact -I/-D flags so jsdec sees the same rizin headers.
+    print_status "jsdec: collecting rizin compile flags..."
+    local rizin_flags
+    rizin_flags=$(python3 - "${BUILD_DIR}/compile_commands.json" <<'PY'
+import json, os, shlex, sys
+
+with open(sys.argv[1]) as f:
+    entries = json.load(f)
+
+# Pick any core/librz object so we inherit the full rizin include + define set.
+chosen = None
+for e in entries:
+    f = e.get("file", "")
+    if "/librz/" in f.replace("\\", "/"):
+        chosen = e
+        if "/librz/core/" in f.replace("\\", "/"):
+            break
+if not chosen:
+    chosen = entries[0]
+
+directory = chosen.get("directory", ".")
+args = chosen.get("arguments") or shlex.split(chosen.get("command", ""))
+
+out = []
+i = 0
+while i < len(args):
+    a = args[i]
+    if a.startswith("-I"):
+        val = a[2:] or (args[i + 1] if i + 1 < len(args) else "")
+        if a == "-I":
+            i += 1
+        if val and not os.path.isabs(val):
+            val = os.path.normpath(os.path.join(directory, val))
+        out.append("-I" + val)
+    elif a.startswith("-D"):
+        out.append(a)
+    i += 1
+
+# De-dup, preserve order.
+seen = set()
+print(" ".join(x for x in out if not (x in seen or seen.add(x))))
+PY
+    )
+
+    rm -rf "${wasm_obj}"
+    mkdir -p "${wasm_obj}"
+
+    # quickjs-ng core. NOTE (experimental): single-threaded emscripten, the JS
+    # engine is compiled without -pthread
+    local qjs_args="-O2 -D__EMSCRIPTEN__=1 -D_GNU_SOURCE=1 -fvisibility=hidden -Wno-implicit-fallthrough -Wno-sign-compare -Wno-unused-parameter -I${qjs_dir}"
+    print_status "jsdec: compiling quickjs-ng (wasm)..."
+    for src in cutils libbf libregexp libunicode quickjs; do
+        emcc ${qjs_args} -c "${qjs_dir}/${src}.c" -o "${wasm_obj}/qjs_${src}.o"
+    done
+
+    # jsdec C sources. -DCORELIB drops the dlopen `rizin_plugin` struct, leaving
+    # rz_core_plugin_jsdec for static linking. gen_dir provides "js/bytecode*.h".
+    local jsdec_inc="-I${JSDEC_DIR} -I${JSDEC_DIR}/c -I${JSDEC_DIR}/include -I${qjs_dir} -I${gen_dir}"
+    print_status "jsdec: compiling plugin sources (wasm)..."
+    for src in jsdec base64 jsdec-plugin; do
+        emcc -O2 -D__EMSCRIPTEN__=1 -DCORELIB ${jsdec_inc} ${rizin_flags} \
+            -c "${JSDEC_DIR}/c/${src}.c" -o "${wasm_obj}/jsdec_${src//-/_}.o"
+    done
+
+    print_status "jsdec: archiving ${JSDEC_STATIC_LIB##*/}..."
+    rm -f "${JSDEC_STATIC_LIB}"
+    emar rcs "${JSDEC_STATIC_LIB}" "${wasm_obj}"/*.o
+    print_success "jsdec static library ready"
+}
 
 CLEAN=false
 
@@ -22,18 +129,28 @@ while [[ $# -gt 0 ]]; do
         -o|--output) OUTPUT_DIR="$2"; shift 2 ;;
         -j|--jobs) BUILD_JOBS="$2"; shift 2 ;;
         -c|--clean) CLEAN=true; shift ;;
-        -h|--help) echo "Usage: $0 [-v VER] [-o DIR] [-j N] [-c] [-h]"; exit 0 ;;
+        --jsdec) ENABLE_JSDEC=1; shift ;;
+        -h|--help) echo "Usage: $0 [-v VER] [-o DIR] [-j N] [-c] [--jsdec] [-h]"; exit 0 ;;
         *) print_error "Unknown option: $1"; exit 1 ;;
     esac
 done
 
 RIZIN_DIR="${SCRIPT_DIR}/.rizin-src"
 BUILD_DIR="${RIZIN_DIR}/build-wasm"
+JSDEC_DIR="${SCRIPT_DIR}/.jsdec-src"
+# Static archive the jsdec WASM objects are bundled into; the rizin link step
+# pulls it in.
+JSDEC_STATIC_LIB="${BUILD_DIR}/libjsdec.a"
 
 echo "â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—"
 echo "â•‘           rzwasi - Build Rizin for WebAssembly           â•‘"
 echo "â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•"
 echo "Version: ${RIZIN_VERSION} | Jobs: ${BUILD_JOBS}"
+if [ "${ENABLE_JSDEC}" = "1" ]; then
+    echo "jsdec decompiler: ENABLED (v${JSDEC_VERSION}, experimental)"
+else
+    echo "jsdec decompiler: disabled (set ENABLE_JSDEC=1 or pass --jsdec)"
+fi
 echo ""
 
 if ! command -v emcc &> /dev/null; then
@@ -158,13 +275,18 @@ RZWEB_EXPORTED_FUNCTIONS="_main,_malloc,_free,_rzweb_create_session,_rzweb_close
 
 if [ -f "$SESSION_API_SRC" ]; then
     cp "$SESSION_API_SRC" "$SESSION_API_DEST"
-    python3 - "$RIZIN_MESON" "$RZWEB_EXPORTED_FUNCTIONS" <<'PY'
+    JSDEC_LINK_LIB=""
+    if [ "${ENABLE_JSDEC}" = "1" ]; then
+        JSDEC_LINK_LIB="${JSDEC_STATIC_LIB}"
+    fi
+    python3 - "$RIZIN_MESON" "$RZWEB_EXPORTED_FUNCTIONS" "$JSDEC_LINK_LIB" <<'PY'
 from pathlib import Path
 import re
 import sys
 
 path = Path(sys.argv[1])
 exports = sys.argv[2]
+jsdec_lib = sys.argv[3] if len(sys.argv) > 3 else ""
 text = path.read_text()
 original = text
 
@@ -185,7 +307,13 @@ if target_end == -1:
     raise SystemExit("Could not find end of rizin executable block")
 
 block = text[target_start:target_end + 3]
-link_args_line = f"  link_args: ['-sEXPORTED_FUNCTIONS={exports}'],\n"
+
+# When jsdec is enabled, append its prebuilt static archive to the link line and
+# define RZWEB_ENABLE_JSDEC so rzweb_session_api.c registers the plugin.
+link_items = [f"'-sEXPORTED_FUNCTIONS={exports}'"]
+if jsdec_lib:
+    link_items.append(repr(jsdec_lib))
+link_args_line = f"  link_args: [{', '.join(link_items)}],\n"
 
 if "link_args:" in block:
     block = re.sub(r"  link_args: \[[^\n]*\],\n", link_args_line, block, count=1)
@@ -194,6 +322,12 @@ else:
     if marker not in block:
         raise SystemExit("Could not find install marker in rizin executable block")
     block = block.replace(marker, link_args_line + marker, 1)
+
+if jsdec_lib and "RZWEB_ENABLE_JSDEC" not in block:
+    c_args_line = "  c_args: ['-DRZWEB_ENABLE_JSDEC'],\n"
+    marker = "  install: true,\n"
+    if marker in block:
+        block = block.replace(marker, c_args_line + marker, 1)
 
 if block != text[target_start:target_end + 3]:
     text = text[:target_start] + block + text[target_end + 3:]
@@ -369,6 +503,12 @@ if [ -f "$USERCONF" ]; then
     sed -i 's/#define HAVE_LOGIN_TTY.*1/#define HAVE_LOGIN_TTY 0/g' "$USERCONF"
     sed -i 's/#define HAVE_JEMALLOC.*1/#define HAVE_JEMALLOC 0/g' "$USERCONF"
     print_success "Patched rz_userconf.h"
+fi
+
+# jsdec must be built here, after meson setup (rizin gen headers +
+# compile_commands.json exist, userconf is patched) and before ninja links rizin.
+if [ "${ENABLE_JSDEC}" = "1" ]; then
+    build_jsdec_wasm
 fi
 
 print_status "Building Rizin..."

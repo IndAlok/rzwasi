@@ -15,6 +15,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Optional
+#ifdef RZWEB_ENABLE_JSDEC
+extern RzCorePlugin rz_core_plugin_jsdec;
+#endif
+
 #define RZWEB_MAX_SESSIONS 8
 
 typedef struct rzweb_session_t {
@@ -79,6 +84,11 @@ static bool rzweb_reset_core(RzwebSession *session) {
 		rzweb_set_string(&session->last_error, "Failed to allocate Rizin core");
 		return false;
 	}
+#ifdef RZWEB_ENABLE_JSDEC
+	// Register the statically linked jsdec plugin so `pdd` is available on every
+	// fresh core. Failure is non-fatal: the session still works without it.
+	rz_core_plugin_add(session->core, &rz_core_plugin_jsdec);
+#endif
 	rzweb_apply_defaults(session->core);
 	rzweb_clear_error(session);
 	return true;

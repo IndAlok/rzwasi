@@ -95,3 +95,39 @@ jobs:
           files: |
             rizin-*-wasm.zip
           generate_release_notes: true
+
+  # Experimental (non-deploying yet)
+  build-jsdec:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read VERSION file
+        id: read-version
+        run: echo "FILE_VERSION=$(cat VERSION | tr -d '\r\n')" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip ninja-build
+          pip3 install meson
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.50'
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Build Rizin WASM + jsdec
+        run: |
+          chmod +x build.sh
+          ENABLE_JSDEC=1 ./build.sh -v "${{ steps.read-version.outputs.FILE_VERSION }}"
+
+      - name: Upload jsdec artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rizin-jsdec-wasm
+          path: dist/
+          retention-days: 14
