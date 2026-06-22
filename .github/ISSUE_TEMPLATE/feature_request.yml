@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest a build option, exported function, or capability
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What capability is missing from the WASM build or session API?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: New `rzweb_*` export, build flag, Rizin component, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: How RzWeb (or another consumer) would use this.
+    validations:
+      required: false

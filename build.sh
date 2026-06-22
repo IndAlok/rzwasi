@@ -5,14 +5,14 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_VERSION=$(cat "${SCRIPT_DIR}/VERSION" 2>/dev/null | tr -d '\r\n' || echo "0.8.2")
+DEFAULT_VERSION=$(cat "${SCRIPT_DIR}/VERSION" 2>/dev/null | tr -d '\r\n' || echo "0.9.0")
 RIZIN_VERSION="${RIZIN_VERSION:-$DEFAULT_VERSION}"
 OUTPUT_DIR="${OUTPUT_DIR:-${SCRIPT_DIR}/dist}"
 BUILD_JOBS="${BUILD_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
 # Optional jsdec decompiler (rizinorg/jsdec -> the `pdd` command). OFF by default.
 ENABLE_JSDEC="${ENABLE_JSDEC:-0}"
-JSDEC_VERSION="${JSDEC_VERSION:-0.8.0}"
+JSDEC_VERSION="${JSDEC_VERSION:-0.9.0}"
 
 print_status() { echo -e "\033[1;34m==>\033[0m $1"; }
 print_error() { echo -e "\033[1;31mError:\033[0m $1" >&2; }
@@ -271,7 +271,7 @@ print_status "Patching Rizin source..."
 SESSION_API_SRC="${SCRIPT_DIR}/patches/rzweb_session_api.c"
 SESSION_API_DEST="${RIZIN_DIR}/binrz/rizin/rzweb_session_api.c"
 RIZIN_MESON="${RIZIN_DIR}/binrz/rizin/meson.build"
-RZWEB_EXPORTED_FUNCTIONS="_main,_malloc,_free,_rzweb_create_session,_rzweb_close_session,_rzweb_open_file,_rzweb_cmd,_rzweb_get_seek,_rzweb_save_project,_rzweb_load_project,_rzweb_get_last_error,_rzweb_autocomplete,_rzweb_get_command_catalog"
+RZWEB_EXPORTED_FUNCTIONS="_main,_malloc,_free,_rzweb_create_session,_rzweb_close_session,_rzweb_open_file,_rzweb_cmd,_rzweb_get_seek,_rzweb_save_project,_rzweb_load_project,_rzweb_get_last_error,_rzweb_autocomplete,_rzweb_get_command_catalog,_rzweb_set_write_mode,_rzweb_commit_changes,_rzweb_get_file_size"
 
 if [ -f "$SESSION_API_SRC" ]; then
     cp "$SESSION_API_SRC" "$SESSION_API_DEST"

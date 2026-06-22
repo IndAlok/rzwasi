@@ -214,6 +214,41 @@ EMSCRIPTEN_KEEPALIVE int rzweb_open_file(int session_id, const char *file_path, 
 	return 1;
 }
 
+// Binary editing helpers. Patching itself goes through rzweb_cmd (wx/wa/w).
+
+// Reopen read-write (oo+) or read-only (oo) without discarding analysis.
+EMSCRIPTEN_KEEPALIVE int rzweb_set_write_mode(int session_id, int enable) {
+	RzwebSession *session = rzweb_get_session(session_id);
+	if (!session || !session->core) {
+		return 0;
+	}
+	char *result = rz_core_cmd_str(session->core, enable ? "oo+" : "oo");
+	free(result);
+	rzweb_clear_error(session);
+	return 1;
+}
+
+// Commit cached writes to the file (wci). Needs the file open read-write.
+EMSCRIPTEN_KEEPALIVE int rzweb_commit_changes(int session_id) {
+	RzwebSession *session = rzweb_get_session(session_id);
+	if (!session || !session->core) {
+		return 0;
+	}
+	char *result = rz_core_cmd_str(session->core, "wci");
+	free(result);
+	rzweb_clear_error(session);
+	return 1;
+}
+
+// Size in bytes of the open file, 0 if none.
+EMSCRIPTEN_KEEPALIVE int rzweb_get_file_size(int session_id) {
+	RzwebSession *session = rzweb_get_session(session_id);
+	if (!session || !session->core) {
+		return 0;
+	}
+	return (int)rz_num_math(session->core->num, "$s");
+}
+
 EMSCRIPTEN_KEEPALIVE const char *rzweb_cmd(int session_id, const char *command) {
 	RzwebSession *session = rzweb_get_session(session_id);
 	if (!session || !session->core) {

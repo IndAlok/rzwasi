@@ -16,6 +16,11 @@ on:
 permissions:
   contents: write
 
+# Cancel superseded PR builds, but never interrupt a main-branch deploy.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
