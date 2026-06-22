@@ -64,7 +64,7 @@ jobs:
           ./build.sh -v "$RIZIN_VERSION"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rizin-${{ env.RIZIN_VERSION }}-wasm
           path: dist/
@@ -131,7 +131,7 @@ jobs:
           ENABLE_JSDEC=1 ./build.sh -v "${{ steps.read-version.outputs.FILE_VERSION }}"
 
       - name: Upload jsdec artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rizin-jsdec-wasm
           path: dist/
