@@ -5,14 +5,14 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_VERSION=$(cat "${SCRIPT_DIR}/VERSION" 2>/dev/null | tr -d '\r\n' || echo "0.8.2")
+DEFAULT_VERSION=$(cat "${SCRIPT_DIR}/VERSION" 2>/dev/null | tr -d '\r\n' || echo "0.9.0")
 RIZIN_VERSION="${RIZIN_VERSION:-$DEFAULT_VERSION}"
 OUTPUT_DIR="${OUTPUT_DIR:-${SCRIPT_DIR}/dist}"
 BUILD_JOBS="${BUILD_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
 # Optional jsdec decompiler (rizinorg/jsdec -> the `pdd` command). OFF by default.
 ENABLE_JSDEC="${ENABLE_JSDEC:-0}"
-JSDEC_VERSION="${JSDEC_VERSION:-0.8.0}"
+JSDEC_VERSION="${JSDEC_VERSION:-0.9.0}"
 
 print_status() { echo -e "\033[1;34m==>\033[0m $1"; }
 print_error() { echo -e "\033[1;31mError:\033[0m $1" >&2; }
@@ -187,7 +187,7 @@ ranlib = 'emranlib'
 
 [built-in options]
 c_args = ['-O2', '-DHAVE_PTY=0', '-DHAVE_FORK=0', '-D__EMSCRIPTEN__=1']
-c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=33554432', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0', '-sMODULARIZE=0', '-sEXPORT_ES6=0', '-sEXPORTED_RUNTIME_METHODS=FS,callMain,ccall,cwrap,print,printErr,setValue,getValue', '-sEXPORTED_FUNCTIONS=_main,_malloc,_free', '-sINVOKE_RUN=0', '-sFORCE_FILESYSTEM=1', '-sEXIT_RUNTIME=0', '-sASSERTIONS=0']
+c_link_args = ['-sALLOW_MEMORY_GROWTH=1', '-sINITIAL_MEMORY=67108864', '-sTOTAL_STACK=8388608', '-sERROR_ON_UNDEFINED_SYMBOLS=0', '-sEMULATE_FUNCTION_POINTER_CASTS=1', '-sMODULARIZE=0', '-sEXPORT_ES6=0', '-sEXPORTED_RUNTIME_METHODS=FS,callMain,ccall,cwrap,print,printErr,setValue,getValue', '-sEXPORTED_FUNCTIONS=_main,_malloc,_free', '-sINVOKE_RUN=0', '-sFORCE_FILESYSTEM=1', '-sEXIT_RUNTIME=0', '-sASSERTIONS=0']
 
 [host_machine]
 system = 'emscripten'
@@ -267,14 +267,30 @@ else
     print_error "libzip not found"
 fi
 
+print_status "Patching libdemangle for Emscripten..."
+LIBDEMANGLE_MESON=$(find subprojects -maxdepth 2 -name meson.build -path '*libdemangle*' 2>/dev/null | head -1)
+if [ -n "$LIBDEMANGLE_MESON" ] && [ -f "$LIBDEMANGLE_MESON" ]; then
+    # both_libraries() always emits a shared library variant too, which the
+    # Emscripten linker (ld.wasm) cannot produce. Force static-only here.
+    sed -i 's/both_libraries(/static_library(/g' "$LIBDEMANGLE_MESON"
+    sed -i 's/libdemangle\.get_static_lib()/libdemangle/g' "$LIBDEMANGLE_MESON"
+    sed -i 's/libdemangle\.get_shared_lib()/libdemangle/g' "$LIBDEMANGLE_MESON"
+    print_success "Patched libdemangle (static-only)"
+else
+    print_error "libdemangle meson.build not found"
+fi
+
 print_status "Patching Rizin source..."
 SESSION_API_SRC="${SCRIPT_DIR}/patches/rzweb_session_api.c"
 SESSION_API_DEST="${RIZIN_DIR}/binrz/rizin/rzweb_session_api.c"
+STUBS_SRC="${SCRIPT_DIR}/patches/rzweb_emscripten_stubs.c"
+STUBS_DEST="${RIZIN_DIR}/binrz/rizin/rzweb_emscripten_stubs.c"
 RIZIN_MESON="${RIZIN_DIR}/binrz/rizin/meson.build"
-RZWEB_EXPORTED_FUNCTIONS="_main,_malloc,_free,_rzweb_create_session,_rzweb_close_session,_rzweb_open_file,_rzweb_cmd,_rzweb_get_seek,_rzweb_save_project,_rzweb_load_project,_rzweb_get_last_error,_rzweb_autocomplete,_rzweb_get_command_catalog"
+RZWEB_EXPORTED_FUNCTIONS="_main,_malloc,_free,_rzweb_create_session,_rzweb_close_session,_rzweb_open_file,_rzweb_cmd,_rzweb_get_seek,_rzweb_save_project,_rzweb_load_project,_rzweb_get_last_error,_rzweb_autocomplete,_rzweb_get_command_catalog,_rzweb_set_write_mode,_rzweb_commit_changes,_rzweb_get_file_size"
 
 if [ -f "$SESSION_API_SRC" ]; then
     cp "$SESSION_API_SRC" "$SESSION_API_DEST"
+    cp "$STUBS_SRC" "$STUBS_DEST"
     JSDEC_LINK_LIB=""
     if [ "${ENABLE_JSDEC}" = "1" ]; then
         JSDEC_LINK_LIB="${JSDEC_STATIC_LIB}"
@@ -291,7 +307,7 @@ text = path.read_text()
 original = text
 
 single_source = "rizin_exe = executable('rizin', 'rizin.c',"
-wrapped_sources = "rizin_exe = executable('rizin', ['rizin.c', 'rzweb_session_api.c'],"
+wrapped_sources = "rizin_exe = executable('rizin', ['rizin.c', 'rzweb_session_api.c', 'rzweb_emscripten_stubs.c'],"
 
 if single_source in text:
     text = text.replace(single_source, wrapped_sources, 1)

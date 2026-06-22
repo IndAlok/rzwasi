@@ -1,5 +1,7 @@
 .wasi-sdk/
 .rizin-src/
+.jsdec-src/
 dist/
 *.zip
 *.wasm
+__pycache__/

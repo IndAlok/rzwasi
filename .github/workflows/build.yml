@@ -16,12 +16,17 @@ on:
 permissions:
   contents: write
 
+# Cancel superseded PR builds, but never interrupt a main-branch deploy.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Read VERSION file
         id: read-version
@@ -34,7 +39,7 @@ jobs:
           pip3 install meson
 
       - name: Setup Emscripten
-        uses: mymindstorm/setup-emsdk@v14
+        uses: mymindstorm/setup-emsdk@v16
         with:
           version: '3.1.50'
           actions-cache-folder: 'emsdk-cache'
@@ -59,7 +64,7 @@ jobs:
           ./build.sh -v "$RIZIN_VERSION"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rizin-${{ env.RIZIN_VERSION }}-wasm
           path: dist/
@@ -67,7 +72,7 @@ jobs:
 
       - name: Update Nightly Release
         if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           name: Nightly Build
           tag_name: nightly
@@ -90,7 +95,7 @@ jobs:
 
       - name: Create Versioned Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             rizin-*-wasm.zip
@@ -102,7 +107,7 @@ jobs:
     continue-on-error: true
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Read VERSION file
         id: read-version
@@ -115,7 +120,7 @@ jobs:
           pip3 install meson
 
       - name: Setup Emscripten
-        uses: mymindstorm/setup-emsdk@v14
+        uses: mymindstorm/setup-emsdk@v16
         with:
           version: '3.1.50'
           actions-cache-folder: 'emsdk-cache'
@@ -126,7 +131,7 @@ jobs:
           ENABLE_JSDEC=1 ./build.sh -v "${{ steps.read-version.outputs.FILE_VERSION }}"
 
       - name: Upload jsdec artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rizin-jsdec-wasm
           path: dist/

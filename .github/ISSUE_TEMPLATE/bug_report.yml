@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a problem building or running Rizin WASM
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the build failure or runtime issue.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ./setup.sh install
+        2. ./build.sh -v 0.9.0
+        3. See error
+    validations:
+      required: true
+  - type: input
+    id: emsdk
+    attributes:
+      label: Emscripten version
+      description: Output of `emcc --version` (the build targets emsdk 3.1.50).
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Host OS
+      description: e.g. Ubuntu 24.04, macOS 15.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Build / console output
+      render: shell
+    validations:
+      required: false
