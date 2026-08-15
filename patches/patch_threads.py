@@ -45,15 +45,16 @@ def patch_thread_c(filepath):
     with open(filepath, 'w') as f:
         f.write(content)
     
-    print(f"✓ Patched {filepath}")
+    print(f"Patched {filepath}")
 
 def patch_thread_lock_c(filepath):
     """Patch thread_lock.c - make lock functions no-ops for single-threaded Emscripten."""
     with open(filepath, 'r') as f:
         content = f.read()
     
-    # rz_th_lock_new: add Emscripten after Windows block
-    old_pattern = r'(#elif __WINDOWS__\n\t// Windows critical sections.*\n\tInitializeCriticalSection\(&thl->lock\);\n)(#endif\n\treturn thl;)'
+    # rz_th_lock_new: add Emscripten after Windows block.
+    # 0.9.0+ uses a two-line comment before InitializeCriticalSection.
+    old_pattern = r'(#elif __WINDOWS__\n(?:\t//[^\n]*\n)+\tInitializeCriticalSection\(&thl->lock\);\n)(#endif\n\treturn thl;)'
     new_pattern = r'''\1#elif defined(__EMSCRIPTEN__)
 \t/* Single-threaded: no locking needed */
 \2'''
@@ -90,7 +91,7 @@ def patch_thread_lock_c(filepath):
     with open(filepath, 'w') as f:
         f.write(content)
     
-    print(f"✓ Patched {filepath}")
+    print(f"Patched {filepath}")
 
 def patch_thread_sem_c(filepath):
     """Patch thread_sem.c - make semaphore functions no-ops for single-threaded Emscripten."""
@@ -129,7 +130,7 @@ def patch_thread_sem_c(filepath):
     with open(filepath, 'w') as f:
         f.write(content)
     
-    print(f"✓ Patched {filepath}")
+    print(f"Patched {filepath}")
 
 def patch_thread_cond_c(filepath):
     """Patch thread_cond.c - make condition variable functions no-ops for single-threaded Emscripten."""
@@ -164,13 +165,6 @@ def patch_thread_cond_c(filepath):
 \2'''
     content = re.sub(old_pattern, new_pattern, content)
     
-    # rz_th_cond_timed_wait: add Emscripten no-op (uses timeout_ms)
-    old_pattern = r'(#elif __WINDOWS__\n\tSleepConditionVariableCS\(&cond->cond, &lock->lock, timeout_ms\);\n)(#endif\n\})'
-    new_pattern = r'''\1#elif defined(__EMSCRIPTEN__)
-\t/* Single-threaded: no-op */
-\2'''
-    content = re.sub(old_pattern, new_pattern, content)
-    
     # rz_th_cond_free: no Windows-specific code, just pthread destructor before free
     # Pattern: #endif\n\tfree(cond); after pthread_cond_destroy
     old_pattern = r'(#if HAVE_PTHREAD\n\tpthread_cond_destroy\(&cond->cond\);\n)(#endif\n\tfree\(cond\);)'
@@ -182,7 +176,7 @@ def patch_thread_cond_c(filepath):
     with open(filepath, 'w') as f:
         f.write(content)
     
-    print(f"✓ Patched {filepath}")
+    print(f"Patched {filepath}")
 
 def patch_thread_pool_c(filepath):
     """Patch thread_pool.c - return 1 core for Emscripten single-threaded environment."""
@@ -201,7 +195,7 @@ def patch_thread_pool_c(filepath):
     with open(filepath, 'w') as f:
         f.write(content)
     
-    print(f"✓ Patched {filepath}")
+    print(f"Patched {filepath}")
 
 def patch_thread_queue_c(filepath):
     """Patch thread_queue.c for Emscripten single-threaded operation.
@@ -257,7 +251,16 @@ def patch_thread_queue_c(filepath):
     with open(filepath, 'w') as f:
         f.write(content)
     
-    print(f"✓ Patched {filepath}")
+    print(f"Patched {filepath}")
+
+def require_markers(filepath, markers):
+    """Fail the build if a regex did not land. Silent no-ops break WASM."""
+    with open(filepath, "r") as f:
+        content = f.read()
+    missing = [marker for marker in markers if marker not in content]
+    if missing:
+        raise SystemExit(f"ERROR: {filepath} missing patch markers: {missing}")
+
 
 def main():
     if len(sys.argv) < 2:
@@ -266,16 +269,46 @@ def main():
     
     rizin_dir = sys.argv[1]
     util_dir = os.path.join(rizin_dir, "librz", "util")
+
+    thread_c = os.path.join(util_dir, "thread.c")
+    thread_lock_c = os.path.join(util_dir, "thread_lock.c")
+    thread_sem_c = os.path.join(util_dir, "thread_sem.c")
+    thread_cond_c = os.path.join(util_dir, "thread_cond.c")
+    thread_pool_c = os.path.join(util_dir, "thread_pool.c")
+    thread_queue_c = os.path.join(util_dir, "thread_queue.c")
     
     # Patch each file
-    patch_thread_c(os.path.join(util_dir, "thread.c"))
-    patch_thread_lock_c(os.path.join(util_dir, "thread_lock.c"))
-    patch_thread_sem_c(os.path.join(util_dir, "thread_sem.c"))
-    patch_thread_cond_c(os.path.join(util_dir, "thread_cond.c"))
-    patch_thread_pool_c(os.path.join(util_dir, "thread_pool.c"))
-    patch_thread_queue_c(os.path.join(util_dir, "thread_queue.c"))
+    patch_thread_c(thread_c)
+    patch_thread_lock_c(thread_lock_c)
+    patch_thread_sem_c(thread_sem_c)
+    patch_thread_cond_c(thread_cond_c)
+    patch_thread_pool_c(thread_pool_c)
+    patch_thread_queue_c(thread_queue_c)
+
+    require_markers(thread_c, (
+        "return (RZ_TH_TID)0;",
+        "Defer execution to rz_th_wait",
+        "Execute callback now (deferred from rz_th_new)",
+    ))
+    require_markers(thread_lock_c, (
+        "Single-threaded: no locking needed",
+        "return true; /* Single-threaded: always succeed */",
+    ))
+    require_markers(thread_sem_c, (
+        "Single-threaded: no semaphore init needed",
+    ))
+    require_markers(thread_cond_c, (
+        "Single-threaded: no condition var init needed",
+    ))
+    require_markers(thread_pool_c, (
+        "Emscripten: single-threaded, always return 1",
+    ))
+    require_markers(thread_queue_c, (
+        "Do NOT close queue here!",
+        "No waiting - single threaded",
+    ))
     
-    print("\n✓ All thread files patched for Emscripten/WASM support")
+    print("\nAll thread files patched for Emscripten/WASM support")
 
 if __name__ == "__main__":
     main()

@@ -41,7 +41,7 @@ Key pieces:
 ```bash
 ./setup.sh install           # one-time: fetch + activate emsdk 3.1.50
 source ~/.emsdk/emsdk_env.sh  # put emcc on PATH
-./build.sh -v 0.9.0          # build a specific Rizin version
+./build.sh -v 0.9.1          # build a specific Rizin version
 # Optional experimental decompiler:
 ENABLE_JSDEC=1 ./build.sh
 ```
