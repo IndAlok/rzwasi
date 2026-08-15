@@ -5,12 +5,13 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_VERSION=$(cat "${SCRIPT_DIR}/VERSION" 2>/dev/null | tr -d '\r\n' || echo "0.9.0")
+DEFAULT_VERSION=$(cat "${SCRIPT_DIR}/VERSION" 2>/dev/null | tr -d '\r\n' || echo "0.9.1")
 RIZIN_VERSION="${RIZIN_VERSION:-$DEFAULT_VERSION}"
 OUTPUT_DIR="${OUTPUT_DIR:-${SCRIPT_DIR}/dist}"
 BUILD_JOBS="${BUILD_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
 # Optional jsdec decompiler (rizinorg/jsdec -> the `pdd` command). OFF by default.
+# jsdec has no v0.9.1 tag; keep the last matching release.
 ENABLE_JSDEC="${ENABLE_JSDEC:-0}"
 JSDEC_VERSION="${JSDEC_VERSION:-0.9.0}"
 
@@ -197,8 +198,34 @@ endian = 'little'
 EOF
 
 print_status "Patching meson.build..."
-sed -i "s/have_lrt = not \['windows', 'darwin', 'openbsd', 'android', 'haiku'\]/have_lrt = not ['windows', 'darwin', 'openbsd', 'android', 'haiku', 'emscripten']/g" meson.build 2>/dev/null || true
-sed -i "s/have_ptrace = not \['windows', 'cygwin', 'sunos', 'haiku'\]/have_ptrace = not ['windows', 'cygwin', 'sunos', 'haiku', 'emscripten']/g" meson.build 2>/dev/null || true
+# 0.9.0+ lists extra hosts (e.g. serenity) in have_lrt. Insert 'emscripten'
+# into whichever platforms are already excluded, and fail if the lists move.
+python3 - meson.build <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+original = text
+
+def insert_emscripten(pattern: str, name: str) -> None:
+    global text
+    match = re.search(pattern, text)
+    if not match:
+        raise SystemExit(f"Could not find {name} exclusion list in meson.build")
+    block = match.group(0)
+    if "'emscripten'" in block:
+        return
+    text = text[: match.start()] + block[:-1] + ", 'emscripten']" + text[match.end() :]
+
+insert_emscripten(r"have_lrt = not \[[^\]]+\]", "have_lrt")
+insert_emscripten(r"have_ptrace = not \[[^\]]+\]", "have_ptrace")
+
+if text != original:
+    path.write_text(text)
+PY
+print_success "Patched meson.build host exclusions"
 
 print_status "Downloading subprojects..."
 meson subprojects download || true
@@ -358,7 +385,7 @@ else
 fi
 
 HEAP_JEM_H="${RIZIN_DIR}/librz/include/rz_heap_jemalloc.h"
-if [ -f "$HEAP_JEM_H" ]; then
+if [ -f "$HEAP_JEM_H" ] && grep -q '#include <rz_jemalloc/internal/jemalloc_internal.h>' "$HEAP_JEM_H"; then
     sed -i 's|#include <rz_jemalloc/internal/jemalloc_internal.h>|#ifndef __EMSCRIPTEN__\n#include <rz_jemalloc/internal/jemalloc_internal.h>\n#endif|g' "$HEAP_JEM_H"
     print_success "Patched rz_heap_jemalloc.h"
 fi
@@ -401,6 +428,10 @@ fi
 print_status "Patching cons.c for Emscripten output..."
 CONS_C="${RIZIN_DIR}/librz/cons/cons.c"
 if [ -f "$CONS_C" ]; then
+    if ! grep -q 'static inline void __cons_write_ll(const char \*buf, int len) {$' "$CONS_C"; then
+        print_error "cons.c __cons_write_ll signature not found"
+        exit 1
+    fi
     # Add emscripten.h include at the top
     if ! grep -q "include <emscripten.h>" "$CONS_C"; then
         sed -i '1s/^/#ifdef __EMSCRIPTEN__\n#include <emscripten.h>\n#endif\n/' "$CONS_C"
