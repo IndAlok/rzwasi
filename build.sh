@@ -313,7 +313,7 @@ SESSION_API_DEST="${RIZIN_DIR}/binrz/rizin/rzweb_session_api.c"
 STUBS_SRC="${SCRIPT_DIR}/patches/rzweb_emscripten_stubs.c"
 STUBS_DEST="${RIZIN_DIR}/binrz/rizin/rzweb_emscripten_stubs.c"
 RIZIN_MESON="${RIZIN_DIR}/binrz/rizin/meson.build"
-RZWEB_EXPORTED_FUNCTIONS="_main,_malloc,_free,_rzweb_create_session,_rzweb_close_session,_rzweb_open_file,_rzweb_cmd,_rzweb_get_seek,_rzweb_save_project,_rzweb_load_project,_rzweb_get_last_error,_rzweb_autocomplete,_rzweb_get_command_catalog,_rzweb_set_write_mode,_rzweb_commit_changes,_rzweb_get_file_size"
+RZWEB_EXPORTED_FUNCTIONS="_main,_malloc,_free,_rzweb_create_session,_rzweb_close_session,_rzweb_open_file,_rzweb_cmd,_rzweb_get_seek,_rzweb_save_project,_rzweb_load_project,_rzweb_apply_project,_rzweb_get_last_error,_rzweb_autocomplete,_rzweb_get_command_catalog,_rzweb_set_write_mode,_rzweb_commit_changes,_rzweb_get_file_size"
 
 if [ -f "$SESSION_API_SRC" ]; then
     cp "$SESSION_API_SRC" "$SESSION_API_DEST"

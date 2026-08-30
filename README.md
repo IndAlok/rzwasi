@@ -112,9 +112,12 @@ Module.callMain(['-q', '-c', 'afl', '/work/binary']);
 - `rzweb_get_seek`
 - `rzweb_save_project`
 - `rzweb_load_project`
+- `rzweb_apply_project`
 - `rzweb_get_last_error`
 - `rzweb_autocomplete`
 - `rzweb_get_command_catalog`
+
+`rzweb_load_project` resets the core then loads (`Po` when `load_bin_io` is set). `rzweb_apply_project` applies a `.rzdb` onto a binary already opened with `rzweb_open_file` (`Poo`) and does not reset the core.
 
 Minimal example:
 

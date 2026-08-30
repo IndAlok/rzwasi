@@ -384,3 +384,21 @@ EMSCRIPTEN_KEEPALIVE int rzweb_load_project(int session_id, const char *project_
 	rzweb_clear_error(session);
 	return 1;
 }
+
+// Unlike rzweb_load_project this does not reset the core, so MEMFS bytes already
+// opened with rzweb_open_file stay mapped.
+EMSCRIPTEN_KEEPALIVE int rzweb_apply_project(int session_id, const char *project_path) {
+	RzwebSession *session = rzweb_get_session(session_id);
+	if (!session || !session->core || !project_path || !*project_path) {
+		return 0;
+	}
+
+	RzSerializeResultInfo result_info = { 0 };
+	RzProjectErr err = rz_project_load_file(session->core, project_path, false, &result_info);
+	if (err != RZ_PROJECT_ERR_SUCCESS) {
+		return rzweb_fail(session, rz_project_err_message(err));
+	}
+
+	rzweb_clear_error(session);
+	return 1;
+}
