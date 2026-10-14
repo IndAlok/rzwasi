@@ -177,6 +177,82 @@ if [ "$CLEAN" = true ] && [ -d "${BUILD_DIR}" ]; then
     rm -rf "${BUILD_DIR}"
 fi
 
+print_status "Applying wasm analysis speedup..."
+WASM_SPEED_PATCH="${SCRIPT_DIR}/patches/wasm-analysis-speedup.patch"
+if [ ! -f "$WASM_SPEED_PATCH" ]; then
+    print_error "Missing patches/wasm-analysis-speedup.patch"
+    exit 1
+fi
+if git apply --check "$WASM_SPEED_PATCH" 2>/dev/null; then
+    git apply "$WASM_SPEED_PATCH"
+    print_success "Applied wasm analysis speedup"
+elif git apply --reverse --check "$WASM_SPEED_PATCH" 2>/dev/null; then
+    print_status "Wasm analysis speedup already applied"
+else
+    print_error "Wasm analysis speedup patch did not apply"
+    exit 1
+fi
+
+python3 - "${RIZIN_DIR}/librz/core/canalysis.c" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = (
+    "RZ_IPI void rz_core_analysis_value_pointers(RzCore *core, RzOutputMode mode) {\n"
+    "\tut64 o_align = rz_config_get_i(core->config, \"search.align\");\n"
+)
+new = (
+    "RZ_IPI void rz_core_analysis_value_pointers(RzCore *core, RzOutputMode mode) {\n"
+    "\tif (!rz_analysis_archinfo(core->analysis, RZ_ANALYSIS_ARCHINFO_CAN_USE_POINTERS)) {\n"
+    "\t\treturn;\n"
+    "\t}\n"
+    "\tut64 o_align = rz_config_get_i(core->config, \"search.align\");\n"
+)
+if new in text:
+    print("pointer search skip already present")
+elif old in text:
+    path.write_text(text.replace(old, new, 1))
+    print("skipped pointer search where the architecture does not use pointers")
+else:
+    raise SystemExit("value_pointers prologue not found")
+PY
+print_success "Wasm pointer-search skip ready"
+
+# Mingw sets __WINDOWS__ without _MSC_VER, so wide file APIs need windows.h.
+FILE_C="${RIZIN_DIR}/librz/util/file.c"
+if [ -f "$FILE_C" ] && ! grep -q '#if __WINDOWS__' "$FILE_C"; then
+    python3 - "$FILE_C" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+old = "#if _MSC_VER\n#include <rz_windows.h>\n#include <process.h>\n#endif\n"
+new = "#if __WINDOWS__\n#include <rz_windows.h>\n#endif\n#if _MSC_VER\n#include <process.h>\n#endif\n"
+if old not in text:
+    raise SystemExit("file.c msvc include block not found")
+path.write_text(text.replace(old, new, 1))
+PY
+    print_success "Patched file.c for mingw wide-char APIs"
+fi
+
+TIME_C="${RIZIN_DIR}/librz/util/time.c"
+if [ -f "$TIME_C" ] && ! grep -q 'sys/time.h' "$TIME_C"; then
+    python3 - "$TIME_C" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+old = "#elif __WINDOWS__\n#include <rz_windows.h>\n#endif\n"
+new = "#elif __WINDOWS__\n#include <rz_windows.h>\n#if !defined(_MSC_VER)\n#include <sys/time.h>\n#endif\n#endif\n"
+if old not in text:
+    raise SystemExit("time.c windows include not found")
+path.write_text(text.replace(old, new, 1))
+PY
+    print_success "Patched time.c for mingw gettimeofday"
+fi
+
 CROSS_FILE="${RIZIN_DIR}/wasm32-emscripten.txt"
 cat > "${CROSS_FILE}" <<'EOF'
 [binaries]
@@ -196,6 +272,15 @@ cpu_family = 'wasm32'
 cpu = 'wasm32'
 endian = 'little'
 EOF
+
+# Meson on Windows cannot spawn the extensionless emcc shell script.
+if [ -n "${WINDIR:-}" ]; then
+    sed -i "s/c = 'emcc'/c = 'emcc.bat'/" "$CROSS_FILE"
+    sed -i "s/cpp = 'em++'/cpp = 'em++.bat'/" "$CROSS_FILE"
+    sed -i "s/ar = 'emar'/ar = 'emar.bat'/" "$CROSS_FILE"
+    sed -i "s/strip = 'emstrip'/strip = 'emstrip.bat'/" "$CROSS_FILE"
+    sed -i "s/ranlib = 'emranlib'/ranlib = 'emranlib.bat'/" "$CROSS_FILE"
+fi
 
 print_status "Patching meson.build..."
 # 0.9.0+ lists extra hosts (e.g. serenity) in have_lrt. Insert 'emscripten'
@@ -228,7 +313,15 @@ PY
 print_success "Patched meson.build host exclusions"
 
 print_status "Downloading subprojects..."
-meson subprojects download || true
+# Parallel wrap downloads deadlock on Windows file locks. Fetch one at a time there.
+if [ -n "${WINDIR:-}" ]; then
+    for wrap in subprojects/*.wrap; do
+        name=$(basename "$wrap" .wrap)
+        meson subprojects download "$name" || true
+    done
+else
+    meson subprojects download || true
+fi
 
 print_status "Patching libzip for Emscripten..."
 LIBZIP_DIR=$(find subprojects -maxdepth 1 -name "libzip-*" -type d 2>/dev/null | head -1)
@@ -398,6 +491,56 @@ if [ -f "$SYS_C" ]; then
     sed -i 's|#if HAVE_BACKTRACE|#if HAVE_BACKTRACE \&\& !defined(__EMSCRIPTEN__)|g' "$SYS_C"
     sed -i 's~#warning TODO: rz_sys_backtrace : unimplemented~#ifdef __EMSCRIPTEN__\n\tchar buf[1024];\n\tint len = emscripten_get_callstack(EM_LOG_C_STACK | EM_LOG_JS_STACK, buf, sizeof(buf));\n\tif (len > 0) { eprintf("%s\\n", buf); }\n\treturn;\n#else\n#warning TODO: rz_sys_backtrace : unimplemented\n#endif~g' "$SYS_C"
     print_success "Patched sys.c"
+    python3 - "$SYS_C" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+old = """#if __WINDOWS__
+#include <io.h>
+#include <rz_windows.h>
+#include <VersionHelpers.h>
+#include <signal.h>
+#define TMP_BUFSIZE 4096
+#ifdef _MSC_VER
+#include <psapi.h>
+#include <dbghelp.h>
+#include <process.h> // to allow getpid under windows msvc compilation
+#include <direct.h> // to allow getcwd under windows msvc compilation
+#endif /* _MSC_VER */
+"""
+new = """#if __WINDOWS__
+#include <io.h>
+#include <rz_windows.h>
+#include <VersionHelpers.h>
+#include <signal.h>
+#include <psapi.h>
+#include <process.h>
+#define TMP_BUFSIZE 4096
+#ifndef _MSC_VER
+#define getpid _getpid
+#endif
+#ifdef _MSC_VER
+#include <dbghelp.h>
+#include <direct.h> // to allow getcwd under windows msvc compilation
+#endif /* _MSC_VER */
+"""
+if old in text:
+    path.write_text(text.replace(old, new, 1))
+    print("patched sys.c for mingw")
+PY
+    SUBPROC_C="${RIZIN_DIR}/librz/util/subprocess.c"
+    python3 - "$SUBPROC_C" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+old = "&subproc_mutex"
+new = "(void *volatile *)&subproc_mutex"
+if old in text and new not in text:
+    path.write_text(text.replace(old, new))
+    print("patched subprocess.c pointer casts")
+PY
 fi
 
 print_status "Patching io_shm.c..."
@@ -534,7 +677,9 @@ meson setup "${BUILD_DIR}" \
 print_status "Removing pthread flags..."
 find "${BUILD_DIR}" -name "*.ninja" -type f | while read ninja_file; do
     sed -i 's/ -pthread//g' "$ninja_file"
+    sed -i 's/"-pthread"//g' "$ninja_file"
     sed -i 's/ -sPTHREAD_POOL_SIZE=[0-9]*//g' "$ninja_file"
+    sed -i 's/"-sPTHREAD_POOL_SIZE=[0-9]*"//g' "$ninja_file"
     sed -i 's/ --shared-memory//g' "$ninja_file"
     sed -i 's/ --import-memory//g' "$ninja_file"
 done
